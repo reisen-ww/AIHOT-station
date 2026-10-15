@@ -1,0 +1,34 @@
+.env
+.env.*
+!.env.example
+node_modules/
+dist/
+.cache/
+.DS_Store
+.data/
+
+# Web production build
+apps/web/build/
+apps/web/.react-router/
+
+# Font package unpacked to regenerate the report nameplates (docs/customize.md)
+package/
+fontsource-noto-sans-sc-*.tgz
+
+# 运行时产物
+data/
+logs/
+*.log
+*.err
+*.pid
+worker.pid
+_start.log
+
+# 本地临时脚本与文件
+.tmp-*
+_*
+.claude/
+
+# 备份文件
+*.bak
+*.bak-*
