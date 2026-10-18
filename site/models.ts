@@ -19,6 +19,13 @@ export interface ModelPreset {
 
 /** 具名的模型示例（每个要配自己的密钥）。用不上可以删掉。 */
 export const PRESETS: Record<string, ModelPreset> = {
+  // 中转站的 auto 路由：由它自己挑模型。主模型（default）连续失败时，worker 自动把各步骤回退到它、
+  // 恢复后切回（operations/recover.ts）。它也是推理模型（与 default 档 LLM_REASONING_TOKENS 同款）；
+  // response_format JSON 模式实测（2026-10-18）可用，返回严格 JSON。
+  auto: {
+    service: "llm", model: "auto", baseUrlEnv: "LLM_BASE_URL", apiKeyEnv: "LLM_API_KEY",
+    reasoningTokens: 4000, jsonMode: true,
+  },
   // GLM 5.3 Flash always reasons; the lowest effort keeps short structured tasks fast.
   "glm-5.3-flash": {
     service: "zhipu", model: "glm-5.3-flash", baseUrlEnv: "ZHIPU_BASE_URL", apiKeyEnv: "ZHIPU_API_KEY",
