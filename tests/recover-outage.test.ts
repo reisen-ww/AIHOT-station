@@ -1,7 +1,8 @@
 // Outage fallback: when every recent call of the main model failed, the steps are demoted to the
 // relay's auto route (settings models.* in the admin's own format), failing sources are due again and
-// failed articles requeue; two consecutive rounds with a success restore the snapshot; without
-// traffic nothing changes.
+// failed articles requeue. While down the steps call `auto`, so the restore verdict watches the models
+// in use (auto), not the main model the steps no longer call; two consecutive ok rounds restore the
+// snapshot; without traffic nothing changes.
 import { tag } from "./setup.ts";
 import assert from "node:assert/strict";
 import { after, test } from "node:test";
@@ -11,9 +12,10 @@ import { requeueFailed } from "@aihot/backend/jobs/content";
 import { stopBoss } from "@aihot/backend/jobs/queue";
 import { recoverAfterOutage } from "@aihot/backend/operations/recover";
 
-// The attempts must match the model the state machine filters on (env LLM_MODEL).
+// The demotion verdict filters on the main model (env LLM_MODEL); while down the steps call auto.
 process.env.LLM_MODEL ??= "longcat-2.5";
 const MODEL = process.env.LLM_MODEL!;
+const AUTO = "auto";
 const STATE_KEY = "recovery.outage";
 
 after(async () => {
@@ -21,11 +23,11 @@ after(async () => {
   await closeDb();
 });
 
-/** One live attempt of the main model as receipts.ts would record it. */
-async function attempt(status: "received" | "failed") {
+/** One live attempt of a model as receipts.ts would record it (the main model, or the demoted auto). */
+async function attempt(status: "received" | "failed", model = MODEL) {
   const [r] = await sql<{ id: number }[]>`
-    INSERT INTO receipts (logical_key, service, model, purpose, status) VALUES (${`outage-${tag()}`}, 'llm', ${MODEL}, 'invariant_test', ${status}) RETURNING id`;
-  await sql`INSERT INTO receipt_attempts (receipt_id, attempt, service, model, status, origin) VALUES (${r!.id}, 1, 'llm', ${MODEL}, ${status}, 'live')`;
+    INSERT INTO receipts (logical_key, service, model, purpose, status) VALUES (${`outage-${tag()}`}, 'llm', ${model}, 'invariant_test', ${status}) RETURNING id`;
+  await sql`INSERT INTO receipt_attempts (receipt_id, attempt, service, model, status, origin) VALUES (${r!.id}, 1, 'llm', ${model}, ${status}, 'live')`;
 }
 
 async function article(state: string) {
@@ -72,7 +74,7 @@ test("every recent main-model call failed: steps are demoted to auto, sources an
   assert.ok((await sql`SELECT 1 FROM audit_log WHERE action = 'recovery.demote'`).length > 0);
 });
 
-test("one ok round only counts the streak; the second restores the snapshot; a failure resets it", async () => {
+test("while down the demoted model's calls count: two ok rounds restore, a failure resets the streak", async () => {
   await clear();
   await clearState();
   process.env.LLM_MODEL = "longcat-2.5";
@@ -81,17 +83,18 @@ test("one ok round only counts the streak; the second restores the snapshot; a f
   await recoverAfterOutage(); // demote
   assert.equal((await state())[0]!.value!.state, "down");
 
-  await attempt("received");
+  // The steps now call auto, and the main model is not called at all: auto's success is the live signal.
+  await attempt("received", AUTO);
   assert.equal((await recoverAfterOutage()).state, "down");
   assert.equal((await state())[0]!.value!.confirmOkStreak, 1);
   assert.equal((await modelSettings())[0]!.value.model, "auto"); // not restored yet
 
   await clear(); // the earlier ok attempt still sits in the 10-minute window: drop it for a failed-only round
-  await attempt("failed");
+  await attempt("failed", AUTO);
   await recoverAfterOutage(); // the streak resets
   assert.equal((await state())[0]!.value!.confirmOkStreak, 0);
 
-  await attempt("received");
+  await attempt("received", AUTO);
   await recoverAfterOutage(); // first ok round
   assert.equal((await state())[0]!.value!.state, "down");
   await recoverAfterOutage(); // second consecutive ok round restores
@@ -110,10 +113,48 @@ test("an empty snapshot removes the demotion on restore", async () => {
   await attempt("failed");
   await recoverAfterOutage();
   assert.equal((await modelSettings()).length, Object.keys(capabilities()).length);
-  await attempt("received");
+  await attempt("received", AUTO);
   await recoverAfterOutage(); // first ok round only counts the streak
   await recoverAfterOutage(); // second round restores
   assert.equal((await modelSettings()).length, 0); // nothing was there before: the overrides are gone
+});
+
+test("an empty snapshot does not delete the settings an admin set while down", async () => {
+  await clear();
+  await clearState();
+  process.env.LLM_MODEL = "longcat-2.5";
+  await attempt("failed");
+  await recoverAfterOutage(); // demote with an empty snapshot (no models.* existed)
+  assert.equal((await state())[0]!.value!.demotedFrom && Object.keys((await state())[0]!.value!.demotedFrom!).length, 0);
+
+  // An admin sets a step while the site is down; the snapshot cannot know about it.
+  await sql`UPDATE settings SET value = ${sql.json({ model: "deepseek-flash" } as never)}, updated_by = 'admin' WHERE key = 'models.summarize'`;
+  await attempt("received", AUTO);
+  await recoverAfterOutage();
+  await recoverAfterOutage(); // restore
+
+  const settings = await modelSettings();
+  assert.deepEqual(settings.map((row) => row.key), ["models.summarize"]);
+  assert.equal(settings[0]!.value.model, "deepseek-flash"); // kept, not deleted with the auto overrides
+  assert.equal((await state())[0]!.value!.state, "idle");
+});
+
+test("a snapshot key the admin changed while down keeps the newer value on restore", async () => {
+  await clear();
+  await clearState();
+  process.env.LLM_MODEL = "longcat-2.5";
+  await sql`INSERT INTO settings (key, value, updated_by) VALUES ('models.score', ${sql.json({ model: "deepseek-flash" } as never)}, 'admin')`;
+  await attempt("failed");
+  await recoverAfterOutage(); // demote, snapshot models.score = deepseek-flash
+  await sql`UPDATE settings SET value = ${sql.json({ model: "qwen3.8-flash" } as never)}, updated_by = 'admin' WHERE key = 'models.score'`;
+  await attempt("received", AUTO);
+  await recoverAfterOutage();
+  await recoverAfterOutage(); // restore
+
+  const settings = await modelSettings();
+  assert.equal(settings.length, 1);
+  assert.equal(settings[0]!.key, "models.score");
+  assert.equal(settings[0]!.value.model, "qwen3.8-flash"); // the admin's newer choice wins over the snapshot
 });
 
 test("no recent main-model traffic: nothing changes, whatever the state is", async () => {
