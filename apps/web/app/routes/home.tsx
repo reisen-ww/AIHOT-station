@@ -5,7 +5,6 @@ import { apiDeadlineCache, loadOr404 } from "../lib/api.server";
 import { filterParams, itemListLd, listPath, pageMeta, readFilters, siteLd } from "../lib/seo";
 import type { Screen } from "../components/shell/screens";
 import { Timeline } from "../features/feed/Timeline";
-import { HotTopics } from "../features/feed/HotTopics";
 import { ActiveFilters, CategoryTabs, FeedBar, SearchField } from "../features/feed/Filters";
 
 export const handle: Screen = { tab: "featured", name: "精选" };
@@ -33,23 +32,28 @@ export function headers({ loaderHeaders }: Route.HeadersArgs) {
 
 export default function Home() {
   const { data, filters } = useLoaderData<typeof loader>();
-  const title = filters.tag ? `#${filters.tag}` : "精选";
+  // 有筛选时按筛选结果读；没有筛选时首页就是「今天这一页」（报纸版式）。
+  const filtered = !!filters.tag || !!filters.category || filters.channel !== "all";
   return (
     <div className="pb-6">
-      {/* Phones: the bar (精选 | 全部, filter, search), the filter in use, today's hot topics, the feed. */}
+      {/* Phones: the bar (精选 | 全部, filter, search) and the filter in use. The 报头 lives in the feed. */}
       <FeedBar base="/" category={filters.category} channel={filters.channel} />
       <ActiveFilters base="/" category={filters.category} channel={filters.channel} tag={filters.tag} />
-      <div className="hidden lg:block">
-        <h1 className="text-[24px] font-semibold leading-[1.3] text-ink">{title}</h1>
-        <div className="mb-5 mt-4 flex items-center justify-between gap-4">
-          <CategoryTabs base="/" category={filters.category} channel={filters.channel} layoutId="home-cat-desk" className="min-w-0" />
-          <SearchField keep={{ category: filters.category }} />
-        </div>
+
+      {/* Desktop 的筛选行：报头之下不再有第二个标题，所以它留在最上面当顶栏用。 */}
+      <div className="hidden items-center justify-between gap-4 pb-1 lg:flex">
+        <CategoryTabs base="/" category={filters.category} channel={filters.channel} layoutId="home-cat-desk" className="min-w-0" />
+        <SearchField keep={{ category: filters.category }} />
       </div>
 
-      {data.hot && <HotTopics entries={data.hot} />}
-
-      <Timeline initial={data} filters={data.filters} />
+      {filtered ? (
+        <>
+          <h1 className="hidden text-[24px] font-semibold leading-[1.3] text-ink lg:block lg:pt-4">{filters.tag ? `#${filters.tag}` : "精选"}</h1>
+          <Timeline initial={data} filters={data.filters} />
+        </>
+      ) : (
+        <Timeline initial={data} filters={data.filters} layout="today" />
+      )}
     </div>
   );
 }

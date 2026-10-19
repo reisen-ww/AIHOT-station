@@ -5,6 +5,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { Link, useLocation, useNavigation } from "react-router";
 import { Collapse } from "../../components/ui/Presence";
 import type { TimelineCard, TimelineFilters, TimelineResponse } from "@aihot/contracts/site";
+import { TodayEmpty, TodayFeed } from "./TodayFeed";
 import { FeedItem } from "./FeedItem";
 import { IconChevronDown } from "../../components/icons";
 import { RingMark } from "@aihot/site/brand/Logo.tsx";
@@ -123,7 +124,7 @@ export function TimelineSlot({ at, children, fresh = false, delay = 0, dataKey, 
   );
 }
 
-export function Timeline({ initial, filters }: { initial: TimelineResponse; filters: TimelineFilters }) {
+export function Timeline({ initial, filters, layout = "timeline" }: { initial: TimelineResponse; filters: TimelineFilters; layout?: "timeline" | "today" }) {
   const location = useLocation();
   const navigation = useNavigation();
   const readSet = useReadSet();
@@ -279,50 +280,58 @@ export function Timeline({ initial, filters }: { initial: TimelineResponse; filt
     setState((s) => ({ ...s, collapsed: s.collapsed.includes(day) ? s.collapsed.filter((d) => d !== day) : [...s.collapsed, day] }));
 
   let order = 0;
+  const todayLayout = layout === "today";
   return (
     <div className="relative">
       {days.length === 0 && (
-        <div className="lg:card">
-          <EmptyState title="这个筛选下还没有精选内容">换个类别看看，或者去全部动态里找找。</EmptyState>
+        <div className={todayLayout ? undefined : "lg:card"}>
+          {todayLayout ? <TodayEmpty message={FEED_COPY.noToday} linkLabel={FEED_COPY.noTodayLink} /> : <EmptyState title="这个筛选下还没有精选内容">换个类别看看，或者去全部动态里找找。</EmptyState>}
         </div>
       )}
 
-      {/* Nothing selected for today: the first screen would otherwise start on an older day and read as
-          a stalled site, so the day is named and 全部动态 is offered. */}
-      {days.length > 0 && days[0]!.day !== today && (
-        <p className="mb-3 flex flex-wrap items-baseline gap-x-1.5 text-[13px] leading-relaxed text-ink-4 lg:card lg:px-[18px] lg:py-3">
-          <span>{FEED_COPY.noToday}</span>
-          <Link to="/all" className="shrink-0 font-medium text-accent hover:underline">
-            {FEED_COPY.noTodayLink}
-          </Link>
-        </p>
-      )}
+      {/* 报纸版式：报头 + 三件大事 + 其余。翻页与快照逻辑仍在这里。 */}
+      {todayLayout ? (
+        state.cards.length > 0 && <TodayFeed initial={initial.cards} cards={state.cards} filters={filters} />
+      ) : (
+        <>
+          {/* Nothing selected for today: the first screen would otherwise start on an older day and read as
+              a stalled site, so the day is named and 全部动态 is offered. */}
+          {days.length > 0 && days[0]!.day !== today && (
+            <p className="mb-3 flex flex-wrap items-baseline gap-x-1.5 text-[13px] leading-relaxed text-ink-4 lg:card lg:px-[18px] lg:py-3">
+              <span>{FEED_COPY.noToday}</span>
+              <Link to="/all" className="shrink-0 font-medium text-accent hover:underline">
+                {FEED_COPY.noTodayLink}
+              </Link>
+            </p>
+          )}
 
-      {days.map(({ day, cards }) => {
-        const collapsed = state.collapsed.includes(day);
-        return (
-          <section key={day} aria-label={day} className="lg:mb-1">
-            <DayHeader day={day} today={today} count={cards.length} collapsed={collapsed} onToggle={() => toggleDay(day)} />
-            <Collapse open={!collapsed}>
-                <ol className="lg:pt-1">
-                  {cards.map((c) => {
-                    const fresh = freshKeys.has(c.key);
-                    const delay = fresh ? Math.min(order++, 10) * 40 : 0;
-                    // The card's own time (when the source published it) is what the reader cares about,
-                    // and it is also the day it is grouped under, so the two always agree.
-                    const shownAt = c.item.publishedAt ?? c.anchorAt;
-                    const label = beijingDate(shownAt) === day ? undefined : beijingStamp(shownAt);
-                    return (
-                      <TimelineSlot key={c.key} dataKey={c.key} at={shownAt} label={label} fresh={fresh} delay={delay}>
-                        <FeedItem item={c.item} group={c.group} filters={filters} read={readSet.has(c.item.id)} onOpen={markRead} at={shownAt} label={label} />
-                      </TimelineSlot>
-                    );
-                  })}
-                </ol>
-            </Collapse>
-          </section>
-        );
-      })}
+          {days.map(({ day, cards }) => {
+            const collapsed = state.collapsed.includes(day);
+            return (
+              <section key={day} aria-label={day} className="lg:mb-1">
+                <DayHeader day={day} today={today} count={cards.length} collapsed={collapsed} onToggle={() => toggleDay(day)} />
+                <Collapse open={!collapsed}>
+                    <ol className="lg:pt-1">
+                      {cards.map((c) => {
+                        const fresh = freshKeys.has(c.key);
+                        const delay = fresh ? Math.min(order++, 10) * 40 : 0;
+                        // The card's own time (when the source published it) is what the reader cares about,
+                        // and it is also the day it is grouped under, so the two always agree.
+                        const shownAt = c.item.publishedAt ?? c.anchorAt;
+                        const label = beijingDate(shownAt) === day ? undefined : beijingStamp(shownAt);
+                        return (
+                          <TimelineSlot key={c.key} dataKey={c.key} at={shownAt} label={label} fresh={fresh} delay={delay}>
+                            <FeedItem item={c.item} group={c.group} filters={filters} read={readSet.has(c.item.id)} onOpen={markRead} at={shownAt} label={label} />
+                          </TimelineSlot>
+                        );
+                      })}
+                    </ol>
+                </Collapse>
+              </section>
+            );
+          })}
+        </>
+      )}
 
       <div ref={sentinel} aria-hidden="true" />
       <FeedEnd loading={loadingMore} error={loadError} hasMore={!!state.nextCursor} manual={state.batches >= AUTO_BATCHES} empty={state.cards.length === 0} onMore={loadMore} />
