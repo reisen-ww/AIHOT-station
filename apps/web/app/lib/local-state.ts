@@ -250,13 +250,58 @@ function asTheme(v: string | null): ThemeChoice | null {
   return v === null ? null : (LEGACY_THEME[v] ?? null);
 }
 
+/**
+ * The look is stored in a cookie, not localStorage: the four stations are four ports on one host,
+ * and localStorage is split per origin (port included) while cookies are per host. A reader who
+ * picks 墨 on one station should land on the next one already in 墨.
+ */
+const THEME_COOKIE = KEYS.theme;
+
+function readThemeCookie(): string | null {
+  try {
+    const prefix = THEME_COOKIE + "=";
+    for (const part of document.cookie.split(";")) {
+      const entry = part.trim();
+      if (entry.startsWith(prefix)) return decodeURIComponent(entry.slice(prefix.length)) || null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function writeThemeCookie(value: ThemeChoice): boolean {
+  try {
+    document.cookie = `${THEME_COOKIE}=${encodeURIComponent(value)}; path=/; max-age=31536000; SameSite=Lax`;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The look last seen in localStorage, before it moved to the cookie; null when there is none. */
+function storedTheme(): ThemeChoice | null {
+  return asTheme(readRaw(KEYS.theme));
+}
+
 export function getThemePreference(): ThemeChoice {
-  return asTheme(readRaw(KEYS.theme)) ?? "sepia";
+  const fromCookie = asTheme(readThemeCookie());
+  if (fromCookie !== null) return fromCookie;
+  // Adopt the choice readers made before it moved to the cookie, so nobody's look changes on them.
+  const legacy = storedTheme();
+  if (legacy !== null) {
+    writeThemeCookie(legacy);
+    return legacy;
+  }
+  return "sepia";
 }
 
 export function setThemePreference(pref: ThemeChoice) {
+  writeThemeCookie(pref);
+  // Kept in step: a reader who clears cookies still keeps the look, and export bundles carry it.
   writeRaw(KEYS.theme, pref);
   invalidate(KEYS.theme);
+  emit(KEYS.theme);
 }
 
 /** The theme-colour a look paints the browser chrome with, and the scheme it reports to the browser. */
@@ -283,10 +328,12 @@ export function useThemeSync() {
 }
 
 /**
- * Inline script run before paint so the first frame already has the reader's theme. It also settles an
- * old stored name ("light"/"dark"/"system") on the two-theme one, so the migration happens once.
+ * Inline script run before paint so the first frame already has the reader's theme. It reads the
+ * theme cookie (shared by all four stations on this host) and falls back to the old localStorage
+ * value, adopting it into the cookie. It also settles an old stored name ("light"/"dark"/"system")
+ * on the two-theme one, so the migration happens once.
  */
-export const THEME_BOOT_SCRIPT = `(function(){try{var c=${JSON.stringify(THEME_COLOR)},k='${KEYS.theme}',v=localStorage.getItem(k);var t=v==='ink'||v==='dark'?'ink':'sepia';if(v!==t){try{localStorage.setItem(k,t)}catch(e){}}document.querySelectorAll('meta[name="theme-color"]').forEach(function(m){m.content=c[t].color});document.documentElement.setAttribute('data-theme',t);document.documentElement.style.colorScheme=c[t].scheme}catch(e){document.documentElement.setAttribute('data-theme','sepia');document.documentElement.style.colorScheme='light'}})();`;
+export const THEME_BOOT_SCRIPT = `(function(){try{var c=${JSON.stringify(THEME_COLOR)},k='${KEYS.theme}',v=null,cs=document.cookie.split(';'),i=0,p=k+'=';for(;i<cs.length;i++){var e=cs[i].trim();if(e.indexOf(p)===0){v=decodeURIComponent(e.slice(p.length));break}}if(v===null||v===''){try{v=localStorage.getItem(k)}catch(e2){}}var t=v==='ink'||v==='dark'?'ink':'sepia';try{if(v!==t)document.cookie=k+'='+t+'; path=/; max-age=31536000; SameSite=Lax';if(v!==t)localStorage.setItem(k,t)}catch(e3){}document.querySelectorAll('meta[name="theme-color"]').forEach(function(m){m.content=c[t].color});document.documentElement.setAttribute('data-theme',t);document.documentElement.style.colorScheme=c[t].scheme}catch(e){document.documentElement.setAttribute('data-theme','sepia');document.documentElement.style.colorScheme='light'}})();`;
 
 // changelog red dot
 function getChangelogSeen(): string | null {
