@@ -1,4 +1,4 @@
-﻿// Reader state kept only in this browser, and the site's one guarded way to browser storage. Keep the
+// Reader state kept only in this browser, and the site's one guarded way to browser storage. Keep the
 // keys and formats once readers have data under them: existing readers' data must stay readable as-is.
 // Storage failures degrade silently.
 import { useEffect, useSyncExternalStore } from "react";
@@ -231,74 +231,62 @@ export function markRead(id: string) {
 }
 
 // theme
-/** A chosen look. "light"/"dark" are the base pair; "sepia" and "ink" are themed variants. */
-export type ThemeChoice = "light" | "dark" | "sepia" | "ink";
+/** A chosen look. The site offers two: sepia (warm paper, the default) and ink (blue-black, low glare). */
+export type ThemeChoice = "sepia" | "ink";
+/** The hook's reading: null on the server, where storage cannot be read yet. */
 export type ThemePreference = ThemeChoice | null;
 
-const THEME_CHOICES: readonly ThemeChoice[] = ["light", "dark", "sepia", "ink"];
+/** What readers had stored before the site settled on two themes, and the look each becomes. */
+const LEGACY_THEME: Record<string, ThemeChoice> = {
+  light: "sepia",
+  sepia: "sepia",
+  dark: "ink",
+  ink: "ink",
+  system: "sepia",
+};
 
-export function getThemePreference(): ThemePreference {
-  const v = readRaw(KEYS.theme);
-  return THEME_CHOICES.includes(v as ThemeChoice) ? (v as ThemeChoice) : null;
+/** A stored or imported theme name, old or new; null when it names no look. */
+function asTheme(v: string | null): ThemeChoice | null {
+  return v === null ? null : (LEGACY_THEME[v] ?? null);
 }
 
-export function setThemePreference(pref: ThemePreference) {
+export function getThemePreference(): ThemeChoice {
+  return asTheme(readRaw(KEYS.theme)) ?? "sepia";
+}
+
+export function setThemePreference(pref: ThemeChoice) {
   writeRaw(KEYS.theme, pref);
   invalidate(KEYS.theme);
 }
 
-export function resolvedTheme(pref: ThemePreference = getThemePreference()): ThemeChoice {
-  if (pref) return pref;
-  try {
-    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-  } catch {
-    return "light";
-  }
-}
-
 /** The theme-colour a look paints the browser chrome with, and the scheme it reports to the browser. */
 const THEME_COLOR: Record<ThemeChoice, { color: string; scheme: "light" | "dark" }> = {
-  light: { color: "#faf9f6", scheme: "light" },
-  dark: { color: "#13191c", scheme: "dark" },
   sepia: { color: "#efe4cc", scheme: "light" },
   ink: { color: "#101419", scheme: "dark" },
 };
 
 /** Puts a theme on the page: the document's data-theme and the browser's theme colour. */
-export function applyTheme(theme: ThemeChoice, followsSystem: boolean) {
+export function applyTheme(theme: ThemeChoice) {
   document.documentElement.setAttribute("data-theme", theme);
-  // The two theme-color tags answer the system scheme; a chosen theme sets both to its own colour.
   for (const meta of document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')) {
-    const scheme = meta.media.includes("dark") ? "dark" : "light";
-    meta.content = followsSystem ? THEME_COLOR[scheme].color : THEME_COLOR[theme].color;
+    meta.content = THEME_COLOR[theme].color;
   }
 }
 
-/**
- * Keeps the page on the reader's theme after the first paint: a choice made in another tab or by an
- * import, and the system switching between light and dark while the page follows it.
- */
+/** Keeps the page on the reader's theme after the first paint: a choice made in another tab or by an import. */
 export function useThemeSync() {
   const pref = useThemePreference();
   useEffect(() => {
-    // Read the stored choice itself: during hydration the hook still reports the server's "none".
-    const current = getThemePreference();
-    applyTheme(resolvedTheme(current), current === null);
-    if (current !== null) return;
-    let query: MediaQueryList;
-    try {
-      query = window.matchMedia("(prefers-color-scheme: dark)");
-    } catch {
-      return;
-    }
-    const onChange = () => applyTheme(query.matches ? "dark" : "light", true);
-    query.addEventListener("change", onChange);
-    return () => query.removeEventListener("change", onChange);
+    // Read the stored choice itself: during hydration the hook still reports the server's "unknown".
+    applyTheme(pref ?? getThemePreference());
   }, [pref]);
 }
 
-/** Inline script run before paint so the first frame already has the reader's theme. */
-export const THEME_BOOT_SCRIPT = `(function(){try{var c=${JSON.stringify(THEME_COLOR)};var t=localStorage.getItem('${KEYS.theme}');if(!c[t]){t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'}document.querySelectorAll('meta[name="theme-color"]').forEach(function(m){m.content=c[t].color});document.documentElement.setAttribute('data-theme',t);document.documentElement.style.colorScheme=c[t].scheme}catch(e){document.documentElement.setAttribute('data-theme','light')}})();`;
+/**
+ * Inline script run before paint so the first frame already has the reader's theme. It also settles an
+ * old stored name ("light"/"dark"/"system") on the two-theme one, so the migration happens once.
+ */
+export const THEME_BOOT_SCRIPT = `(function(){try{var c=${JSON.stringify(THEME_COLOR)},k='${KEYS.theme}',v=localStorage.getItem(k);var t=v==='ink'||v==='dark'?'ink':'sepia';if(v!==t){try{localStorage.setItem(k,t)}catch(e){}}document.querySelectorAll('meta[name="theme-color"]').forEach(function(m){m.content=c[t].color});document.documentElement.setAttribute('data-theme',t);document.documentElement.style.colorScheme=c[t].scheme}catch(e){document.documentElement.setAttribute('data-theme','sepia');document.documentElement.style.colorScheme='light'}})();`;
 
 // changelog red dot
 function getChangelogSeen(): string | null {
@@ -356,8 +344,7 @@ export interface ExportBundle {
 }
 
 export function exportBundle(): ExportBundle {
-  const pref = getThemePreference();
-  return { version: 1, starred: getStarred(), read: getReadIds(), theme: pref ?? "auto" };
+  return { version: 1, starred: getStarred(), read: getReadIds(), theme: getThemePreference() };
 }
 
 export interface ImportReport {
@@ -434,9 +421,11 @@ function mergeLocalData(incoming: { starred: unknown[]; read: unknown[]; theme: 
     readSkipped += Math.max(0, readAdditions.length - readRoom);
     const readFailed = !writeRaw(KEYS.read, JSON.stringify([...readIds, ...readAdditions.slice(0, readRoom)]));
 
+    // A bundle from the four-theme days names "light"/"dark"/"system"; asTheme maps it onto the two.
+    const imported = typeof incoming.theme === "string" ? asTheme(incoming.theme) : null;
     let themeApplied = false;
-    if (!getThemePreference() && THEME_CHOICES.includes(incoming.theme as ThemeChoice)) {
-      themeApplied = writeRaw(KEYS.theme, incoming.theme as ThemeChoice);
+    if (imported !== null && imported !== getThemePreference()) {
+      themeApplied = writeRaw(KEYS.theme, imported);
     }
     cache.clear();
     emit();

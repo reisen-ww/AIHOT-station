@@ -82,7 +82,7 @@ export default function MorePage() {
               <IconMoon size={20} />
             </span>
             <span className="flex-1">外观</span>
-            <ThemeSwitch className="w-[126px]" />
+            <ThemeSwitch className="w-[64px]" />
           </li>
         </Group>
         <Group title="工具与入口">

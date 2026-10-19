@@ -1,4 +1,4 @@
-﻿@import "tailwindcss";
+@import "tailwindcss";
 /* Classes also live in the site's logo and changelog drawings (site/brand, site/changelog) and in the
    modules' web code (their other files are not scanned: words in backend code and data would become classes). */
 @source "../../../site/brand";
@@ -11,7 +11,7 @@
    Components use the semantic names below; values change per theme only.
    --------------------------------------------------------------------------- */
 
-@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *, [data-theme="ink"], [data-theme="ink"] *));
+@custom-variant dark (&:where([data-theme="ink"], [data-theme="ink"] *, [data-theme="dark"], [data-theme="dark"] *));
 /* Touch screens (no hover): pressed states for rows and cards. */
 @custom-variant touch (@media (hover: none));
 
@@ -87,55 +87,57 @@
   --bar-h: 48px;
   --gutter-l: max(16px, env(safe-area-inset-left));
   --gutter-r: max(16px, env(safe-area-inset-right));
+  /* The default look is sepia: warm paper for long reading, and the site's only light theme.
+     Values are the same as the old [data-theme="sepia"] block it replaced. */
   color-scheme: light;
-  --bg: #faf9f6;
-  --bg-sunk: #f3f3ef;
-  --bg-muted: #e9ede9;
-  --surface: #ffffff;
-  --surface-2: #fdfdfb;
-  --raised: #ffffff;
-  --sidebar: #fdfdfb;
-  --daybar: #f0f2ee;
-  --field: #eef1ed;
-  --ink: #202a30;
-  --ink-2: #303c42;
-  --ink-3: #59656b;
-  --ink-4: #657176;
-  --line: #dfe4e1;
-  --line-strong: #d1d9d5;
-  --line-soft: #e9ede9;
-  --accent: #176b75;
-  --accent-ink: #145f68;
-  --accent-soft: rgba(23, 107, 117, 0.08);
-  --accent-softer: rgba(23, 107, 117, 0.05);
-  --accent-contrast: #ffffff;
-  --note: #526f72;
-  --hot: #b3402a;
-  --hot-soft: rgba(179, 64, 42, 0.08);
-  --amber: #b8873a;
-  --amber-ink: #7c5a24;
-  --amber-soft: rgba(184, 135, 58, 0.1);
-  --ok: #2f7d5c;
-  --ok-soft: rgba(47, 125, 92, 0.1);
-  --ok-ink: #2a6e51;
-  --rank-1: #b3402a;
-  --rank-2: #a3642f;
-  --rank-3: #96702e;
-  --rank-rest: #6b7684;
-  --shadow-card: 0 1px 2px rgba(32, 42, 48, 0.025);
-  --shadow-card-hover: 0 3px 12px rgba(32, 42, 48, 0.055);
-  --shadow-soft: 0 4px 12px rgba(28, 39, 51, 0.06);
-  --shadow-thumb: 0 1px 2px rgba(28, 39, 51, 0.1), 0 1px 1px rgba(28, 39, 51, 0.04);
-  --shadow-pop: 0 12px 32px rgba(28, 39, 51, 0.12);
-  --prose-ink: #26323a;
-  --code-bg: #f6f7f4;
-  --code-keyword: #006d77;
-  --code-string: #2f6f44;
-  --code-number: #9a6700;
-  --code-title: #6f42c1;
-  --code-variable: #a13d10;
-  --code-meta: #b42348;
-  --selection: rgba(23, 107, 117, 0.16);
+  --bg: #efe4cc;
+  --bg-sunk: #e7d9bd;
+  --bg-muted: #ddccab;
+  --surface: #f8f0de;
+  --surface-2: #fbf4e6;
+  --raised: #fbf4e6;
+  --sidebar: #f4ead6;
+  --daybar: #e7d9bd;
+  --field: #e9dcc2;
+  --ink: #2b2114;
+  --ink-2: #473a27;
+  --ink-3: #6a5a42;
+  --ink-4: #8a7960;
+  --line: #d9c8a8;
+  --line-strong: #c9b48e;
+  --line-soft: #e4d6bc;
+  --accent: #8a4b2a;
+  --accent-ink: #74401f;
+  --accent-soft: rgba(138, 75, 42, 0.1);
+  --accent-softer: rgba(138, 75, 42, 0.06);
+  --accent-contrast: #f8f0de;
+  --note: #6b5334;
+  --hot: #9c3418;
+  --hot-soft: rgba(156, 52, 24, 0.1);
+  --amber: #96702e;
+  --amber-ink: #6d4f1c;
+  --amber-soft: rgba(150, 112, 46, 0.12);
+  --ok: #4a6b3a;
+  --ok-soft: rgba(74, 107, 58, 0.1);
+  --ok-ink: #3d5a2f;
+  --rank-1: #9c3418;
+  --rank-2: #8a5a24;
+  --rank-3: #7d6428;
+  --rank-rest: #7a6a52;
+  --shadow-card: 0 1px 2px rgba(43, 33, 20, 0.04);
+  --shadow-card-hover: 0 3px 12px rgba(43, 33, 20, 0.08);
+  --shadow-soft: 0 4px 12px rgba(43, 33, 20, 0.08);
+  --shadow-thumb: 0 1px 2px rgba(43, 33, 20, 0.12), 0 1px 1px rgba(43, 33, 20, 0.05);
+  --shadow-pop: 0 12px 32px rgba(43, 33, 20, 0.16);
+  --prose-ink: #33281a;
+  --code-bg: #e9dcc2;
+  --code-keyword: #7a4a1f;
+  --code-string: #4a6b3a;
+  --code-number: #8a5a24;
+  --code-title: #6b3f7a;
+  --code-variable: #9c3418;
+  --code-meta: #8a2f4a;
+  --selection: rgba(138, 75, 42, 0.18);
 }
 
 @media (min-width: 961px) {
@@ -196,59 +198,8 @@
   --selection: rgba(18, 204, 216, 0.22);
 }
 
-/* Sepia: warm paper for long reading. Softer than the light theme, no blue anywhere, and the
-   accent turns to the ink brown that old print uses for emphasis. */
-[data-theme="sepia"] {
-  color-scheme: light;
-  --bg: #efe4cc;
-  --bg-sunk: #e7d9bd;
-  --bg-muted: #ddccab;
-  --surface: #f8f0de;
-  --surface-2: #fbf4e6;
-  --raised: #fbf4e6;
-  --sidebar: #f4ead6;
-  --daybar: #e7d9bd;
-  --field: #e9dcc2;
-  --ink: #2b2114;
-  --ink-2: #473a27;
-  --ink-3: #6a5a42;
-  --ink-4: #8a7960;
-  --line: #d9c8a8;
-  --line-strong: #c9b48e;
-  --line-soft: #e4d6bc;
-  --accent: #8a4b2a;
-  --accent-ink: #74401f;
-  --accent-soft: rgba(138, 75, 42, 0.1);
-  --accent-softer: rgba(138, 75, 42, 0.06);
-  --accent-contrast: #f8f0de;
-  --note: #6b5334;
-  --hot: #9c3418;
-  --hot-soft: rgba(156, 52, 24, 0.1);
-  --amber: #96702e;
-  --amber-ink: #6d4f1c;
-  --amber-soft: rgba(150, 112, 46, 0.12);
-  --ok: #4a6b3a;
-  --ok-soft: rgba(74, 107, 58, 0.1);
-  --ok-ink: #3d5a2f;
-  --rank-1: #9c3418;
-  --rank-2: #8a5a24;
-  --rank-3: #7d6428;
-  --rank-rest: #7a6a52;
-  --shadow-card: 0 1px 2px rgba(43, 33, 20, 0.04);
-  --shadow-card-hover: 0 3px 12px rgba(43, 33, 20, 0.08);
-  --shadow-soft: 0 4px 12px rgba(43, 33, 20, 0.08);
-  --shadow-thumb: 0 1px 2px rgba(43, 33, 20, 0.12), 0 1px 1px rgba(43, 33, 20, 0.05);
-  --shadow-pop: 0 12px 32px rgba(43, 33, 20, 0.16);
-  --prose-ink: #33281a;
-  --code-bg: #e9dcc2;
-  --code-keyword: #7a4a1f;
-  --code-string: #4a6b3a;
-  --code-number: #8a5a24;
-  --code-title: #6b3f7a;
-  --code-variable: #9c3418;
-  --code-meta: #8a2f4a;
-  --selection: rgba(138, 75, 42, 0.18);
-}
+/* Sepia: the default look, defined on :root above (this block's values moved there when the site
+   settled on two themes). [data-theme="sepia"] is still set by the boot script; it needs no overrides. */
 
 /* Ink: a deeper, quieter dark than the default one — blue-black rather than slate, and a low-glare
    cyan that reads as text first and as emphasis second. */
@@ -680,6 +631,6 @@
 
 /* Report pages read on a faintly toned paper in the light theme, lighter than the site's page ground;
    the archive column is halfway between the site sidebar and white. */
-:root:not([data-theme="dark"]):not([data-theme="ink"]) body:has(.report-shell) {
+:root:not([data-theme="ink"]) body:has(.report-shell) {
   background: color-mix(in srgb, var(--bg) 60%, var(--surface));
 }
