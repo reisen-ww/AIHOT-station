@@ -1,4 +1,4 @@
-@import "tailwindcss";
+﻿@import "tailwindcss";
 /* Classes also live in the site's logo and changelog drawings (site/brand, site/changelog) and in the
    modules' web code (their other files are not scanned: words in backend code and data would become classes). */
 @source "../../../site/brand";
@@ -11,7 +11,7 @@
    Components use the semantic names below; values change per theme only.
    --------------------------------------------------------------------------- */
 
-@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *, [data-theme="ink"], [data-theme="ink"] *));
 /* Touch screens (no hover): pressed states for rows and cards. */
 @custom-variant touch (@media (hover: none));
 
@@ -196,6 +196,114 @@
   --selection: rgba(18, 204, 216, 0.22);
 }
 
+/* Sepia: warm paper for long reading. Softer than the light theme, no blue anywhere, and the
+   accent turns to the ink brown that old print uses for emphasis. */
+[data-theme="sepia"] {
+  color-scheme: light;
+  --bg: #efe4cc;
+  --bg-sunk: #e7d9bd;
+  --bg-muted: #ddccab;
+  --surface: #f8f0de;
+  --surface-2: #fbf4e6;
+  --raised: #fbf4e6;
+  --sidebar: #f4ead6;
+  --daybar: #e7d9bd;
+  --field: #e9dcc2;
+  --ink: #2b2114;
+  --ink-2: #473a27;
+  --ink-3: #6a5a42;
+  --ink-4: #8a7960;
+  --line: #d9c8a8;
+  --line-strong: #c9b48e;
+  --line-soft: #e4d6bc;
+  --accent: #8a4b2a;
+  --accent-ink: #74401f;
+  --accent-soft: rgba(138, 75, 42, 0.1);
+  --accent-softer: rgba(138, 75, 42, 0.06);
+  --accent-contrast: #f8f0de;
+  --note: #6b5334;
+  --hot: #9c3418;
+  --hot-soft: rgba(156, 52, 24, 0.1);
+  --amber: #96702e;
+  --amber-ink: #6d4f1c;
+  --amber-soft: rgba(150, 112, 46, 0.12);
+  --ok: #4a6b3a;
+  --ok-soft: rgba(74, 107, 58, 0.1);
+  --ok-ink: #3d5a2f;
+  --rank-1: #9c3418;
+  --rank-2: #8a5a24;
+  --rank-3: #7d6428;
+  --rank-rest: #7a6a52;
+  --shadow-card: 0 1px 2px rgba(43, 33, 20, 0.04);
+  --shadow-card-hover: 0 3px 12px rgba(43, 33, 20, 0.08);
+  --shadow-soft: 0 4px 12px rgba(43, 33, 20, 0.08);
+  --shadow-thumb: 0 1px 2px rgba(43, 33, 20, 0.12), 0 1px 1px rgba(43, 33, 20, 0.05);
+  --shadow-pop: 0 12px 32px rgba(43, 33, 20, 0.16);
+  --prose-ink: #33281a;
+  --code-bg: #e9dcc2;
+  --code-keyword: #7a4a1f;
+  --code-string: #4a6b3a;
+  --code-number: #8a5a24;
+  --code-title: #6b3f7a;
+  --code-variable: #9c3418;
+  --code-meta: #8a2f4a;
+  --selection: rgba(138, 75, 42, 0.18);
+}
+
+/* Ink: a deeper, quieter dark than the default one — blue-black rather than slate, and a low-glare
+   cyan that reads as text first and as emphasis second. */
+[data-theme="ink"] {
+  color-scheme: dark;
+  --bg: #101419;
+  --bg-sunk: #151b21;
+  --bg-muted: #1d242b;
+  --surface: #171e25;
+  --surface-2: #1a222a;
+  --raised: #1d242b;
+  --sidebar: #131920;
+  --daybar: #151b21;
+  --field: rgba(255, 255, 255, 0.055);
+  --ink: #e6ebef;
+  --ink-2: #ccd5dc;
+  --ink-3: #a3aeb8;
+  --ink-4: #7b8792;
+  --line: rgba(255, 255, 255, 0.075);
+  --line-strong: rgba(255, 255, 255, 0.115);
+  --line-soft: rgba(255, 255, 255, 0.055);
+  --accent: #4ecdc4;
+  --accent-ink: #6fdcd4;
+  --accent-soft: rgba(78, 205, 196, 0.13);
+  --accent-softer: rgba(78, 205, 196, 0.07);
+  --accent-contrast: #0b1116;
+  --note: #89b5a8;
+  --hot: #e8836b;
+  --hot-soft: rgba(232, 131, 107, 0.13);
+  --amber: #d9b26a;
+  --amber-ink: #d9b26a;
+  --amber-soft: rgba(217, 178, 106, 0.13);
+  --ok: #6bcb9b;
+  --ok-soft: rgba(107, 203, 155, 0.13);
+  --ok-ink: #86d6ad;
+  --rank-1: #e8836b;
+  --rank-2: #d9996b;
+  --rank-3: #c9a227;
+  --rank-rest: #78849a;
+  --shadow-card: none;
+  --shadow-card-hover: none;
+  --shadow-soft: 0 6px 18px rgba(0, 0, 0, 0.4);
+  --shadow-thumb: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-pop: 0 16px 40px rgba(0, 0, 0, 0.5);
+  --prose-ink: #d3dbe1;
+  --code-bg: #0c1116;
+  --code-keyword: #7fd4de;
+  --code-string: #a9dc9b;
+  --code-number: #f0d08a;
+  --code-title: #b6a8ef;
+  --code-variable: #f0a07c;
+  --code-meta: #f08aa8;
+  --selection: rgba(78, 205, 196, 0.22);
+}
+
 @layer base {
   html {
     -webkit-text-size-adjust: 100%;
@@ -319,7 +427,8 @@
 @utility well {
   background-color: var(--bg-sunk);
   box-shadow: inset 0 0 0 1px var(--line-soft);
-  [data-theme="dark"] & {
+  [data-theme="dark"] &,
+  [data-theme="ink"] & {
     background-color: color-mix(in srgb, var(--bg-muted) 60%, transparent);
   }
 }
@@ -571,6 +680,6 @@
 
 /* Report pages read on a faintly toned paper in the light theme, lighter than the site's page ground;
    the archive column is halfway between the site sidebar and white. */
-:root:not([data-theme="dark"]) body:has(.report-shell) {
+:root:not([data-theme="dark"]):not([data-theme="ink"]) body:has(.report-shell) {
   background: color-mix(in srgb, var(--bg) 60%, var(--surface));
 }

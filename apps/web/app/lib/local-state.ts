@@ -1,4 +1,4 @@
-// Reader state kept only in this browser, and the site's one guarded way to browser storage. Keep the
+﻿// Reader state kept only in this browser, and the site's one guarded way to browser storage. Keep the
 // keys and formats once readers have data under them: existing readers' data must stay readable as-is.
 // Storage failures degrade silently.
 import { useEffect, useSyncExternalStore } from "react";
@@ -231,11 +231,15 @@ export function markRead(id: string) {
 }
 
 // theme
-export type ThemePreference = "light" | "dark" | null;
+/** A chosen look. "light"/"dark" are the base pair; "sepia" and "ink" are themed variants. */
+export type ThemeChoice = "light" | "dark" | "sepia" | "ink";
+export type ThemePreference = ThemeChoice | null;
+
+const THEME_CHOICES: readonly ThemeChoice[] = ["light", "dark", "sepia", "ink"];
 
 export function getThemePreference(): ThemePreference {
   const v = readRaw(KEYS.theme);
-  return v === "light" || v === "dark" ? v : null;
+  return THEME_CHOICES.includes(v as ThemeChoice) ? (v as ThemeChoice) : null;
 }
 
 export function setThemePreference(pref: ThemePreference) {
@@ -243,7 +247,7 @@ export function setThemePreference(pref: ThemePreference) {
   invalidate(KEYS.theme);
 }
 
-export function resolvedTheme(pref: ThemePreference = getThemePreference()): "light" | "dark" {
+export function resolvedTheme(pref: ThemePreference = getThemePreference()): ThemeChoice {
   if (pref) return pref;
   try {
     return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
@@ -252,15 +256,21 @@ export function resolvedTheme(pref: ThemePreference = getThemePreference()): "li
   }
 }
 
-const THEME_COLOR = { light: "#faf9f6", dark: "#13191c" } as const;
+/** The theme-colour a look paints the browser chrome with, and the scheme it reports to the browser. */
+const THEME_COLOR: Record<ThemeChoice, { color: string; scheme: "light" | "dark" }> = {
+  light: { color: "#faf9f6", scheme: "light" },
+  dark: { color: "#13191c", scheme: "dark" },
+  sepia: { color: "#efe4cc", scheme: "light" },
+  ink: { color: "#101419", scheme: "dark" },
+};
 
 /** Puts a theme on the page: the document's data-theme and the browser's theme colour. */
-export function applyTheme(theme: "light" | "dark", followsSystem: boolean) {
+export function applyTheme(theme: ThemeChoice, followsSystem: boolean) {
   document.documentElement.setAttribute("data-theme", theme);
   // The two theme-color tags answer the system scheme; a chosen theme sets both to its own colour.
   for (const meta of document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')) {
     const scheme = meta.media.includes("dark") ? "dark" : "light";
-    meta.content = followsSystem ? THEME_COLOR[scheme] : THEME_COLOR[theme];
+    meta.content = followsSystem ? THEME_COLOR[scheme].color : THEME_COLOR[theme].color;
   }
 }
 
@@ -288,7 +298,7 @@ export function useThemeSync() {
 }
 
 /** Inline script run before paint so the first frame already has the reader's theme. */
-export const THEME_BOOT_SCRIPT = `(function(){try{var t=localStorage.getItem('${KEYS.theme}');if(t==='light'||t==='dark'){var c=t==='dark'?'${THEME_COLOR.dark}':'${THEME_COLOR.light}';document.querySelectorAll('meta[name="theme-color"]').forEach(function(m){m.content=c})}else{t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'}document.documentElement.setAttribute('data-theme',t)}catch(e){document.documentElement.setAttribute('data-theme','light')}})();`;
+export const THEME_BOOT_SCRIPT = `(function(){try{var c=${JSON.stringify(THEME_COLOR)};var t=localStorage.getItem('${KEYS.theme}');if(!c[t]){t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'}document.querySelectorAll('meta[name="theme-color"]').forEach(function(m){m.content=c[t].color});document.documentElement.setAttribute('data-theme',t);document.documentElement.style.colorScheme=c[t].scheme}catch(e){document.documentElement.setAttribute('data-theme','light')}})();`;
 
 // changelog red dot
 function getChangelogSeen(): string | null {
@@ -342,7 +352,7 @@ export interface ExportBundle {
   version: 1;
   starred: LocalStarredItem[];
   read: string[];
-  theme: "light" | "dark" | "auto" | null;
+  theme: ThemeChoice | "auto" | null;
 }
 
 export function exportBundle(): ExportBundle {
@@ -425,8 +435,8 @@ function mergeLocalData(incoming: { starred: unknown[]; read: unknown[]; theme: 
     const readFailed = !writeRaw(KEYS.read, JSON.stringify([...readIds, ...readAdditions.slice(0, readRoom)]));
 
     let themeApplied = false;
-    if (!getThemePreference() && (incoming.theme === "light" || incoming.theme === "dark")) {
-      themeApplied = writeRaw(KEYS.theme, incoming.theme);
+    if (!getThemePreference() && THEME_CHOICES.includes(incoming.theme as ThemeChoice)) {
+      themeApplied = writeRaw(KEYS.theme, incoming.theme as ThemeChoice);
     }
     cache.clear();
     emit();
