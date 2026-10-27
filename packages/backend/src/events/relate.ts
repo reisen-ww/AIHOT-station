@@ -74,6 +74,12 @@ export const BatchSchema = z.object({
   selection: z.object({ addsValue: z.boolean(), reason: z.string().trim().min(1).max(400) }),
 });
 
+/** The reading-value answer alone: with no fact candidate there is no decision list to complete. */
+export const ValueSchema = z.object({
+  query: z.string().max(400).catch(""),
+  selection: z.object({ addsValue: z.boolean(), reason: z.string().trim().min(1).max(400) }),
+});
+
 export const PairSchema = z.object({
   a: z.string().max(400).catch(""),
   b: z.string().max(400).catch(""),

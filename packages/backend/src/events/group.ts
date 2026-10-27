@@ -31,7 +31,7 @@ import { mergeStoryInto } from "./merge.ts";
 import { candidateViews, cosine32, recallFacts, recallSelectedBackground, relatedPosts, vectorsFor } from "./recall.ts";
 import {
   BATCH_SYSTEM, BATCH_PROMPT_VERSION, BatchSchema, PAIR_SYSTEM, PairSchema, RELATE_PROMPT_VERSION, SIGNAL_SYSTEM, SignalSchema, TIE_MIN_CONFIDENCE,
-  batchUser, completeDecisions, firmlyTied, pairUser, reportText, sameOccurrence, signalTarget, storyForDevelopment, verdictsByFact,
+  batchUser, completeDecisions, firmlyTied, pairUser, reportText, sameOccurrence, signalTarget, storyForDevelopment, verdictsByFact, ValueSchema,
   type CandidateView, type ReadingContext, type Relation, type ReportView, type SelectionValue, type Verdict,
 } from "./relate.ts";
 
@@ -75,9 +75,19 @@ function participantKey(source: { id: string; signal_group_id: string | null }):
 const NO_SELECTED_COVERAGE: SelectionValue = { addsValue: true, reason: "没有已公开精选的相关报道" };
 
 async function judgeBatch(articleId: string, query: ReportView, cands: CandidateView[], reading: ReadingContext[]): Promise<{ verdicts: Map<number, Verdict>; selection: SelectionValue; receiptId: number }> {
+  const shared = {
+    model: await modelFor("group"), purpose: "group_article" as const, subject: `article:${articleId}`, promptVersion: BATCH_PROMPT_VERSION,
+    system: BATCH_SYSTEM, user: batchUser(query, cands, "新报道", reading), temperature: 0,
+  };
+  // With no fact candidate only the reading value is asked. The background rows are labelled R1..Rn,
+  // and a model asked for decisions answers about them; no candidate id can name those rows, so the
+  // identity schema rejects the answer as unusable. Keep the two questions on their own schemas.
+  if (!cands.length) {
+    const res = await chatJson({ ...shared, schema: ValueSchema, maxTokens: 400 });
+    return { verdicts: new Map<number, Verdict>(), selection: res.data.selection, receiptId: res.receiptId };
+  }
   const res = await chatJson({
-    model: await modelFor("group"), purpose: "group_article", subject: `article:${articleId}`, promptVersion: BATCH_PROMPT_VERSION,
-    system: BATCH_SYSTEM, user: batchUser(query, cands, "新报道", reading), schema: BatchSchema.refine(value => completeDecisions(value.decisions, cands.length), "Every candidate requires exactly one decision"), temperature: 0, maxTokens: 400 + 120 * cands.length,
+    ...shared, schema: BatchSchema.refine(value => completeDecisions(value.decisions, cands.length), "Every candidate requires exactly one decision"), maxTokens: 400 + 120 * cands.length,
   });
   return { verdicts: verdictsByFact(res.data.decisions, cands), selection: cands.some(c => c.selected) || reading.length ? res.data.selection : NO_SELECTED_COVERAGE, receiptId: res.receiptId };
 }
