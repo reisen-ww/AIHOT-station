@@ -1,5 +1,5 @@
-// Selected news timeline: one card per story, or per fact, or per standalone article. Only duplicate
-// reports fold together. A card stays at its first appearance; later reports never move it.
+// Selected news timeline: one card per fact, or per standalone report. Only duplicate reports fold
+// together. A card stays at its first appearance; later reports never move it.
 import type { GroupInfo, TimelineCard, TimelineFilters, TimelineResponse } from "@aihot/contracts/site";
 import { sql } from "../db.ts";
 import { cachedByKey } from "../lib/cache.ts";
@@ -55,7 +55,6 @@ async function queryGroupedAnchors(q: TimelineQuery, now: Date) {
     await sql<{ gk: string; anchor_at: Date }[]>`
       WITH base AS MATERIALIZED (
         SELECT coalesce(p.published_at, p.discovered_at) AS sort_at, CASE
-          WHEN p.story_id IS NOT NULL THEN 's' || p.story_id::text
           WHEN p.fact_id IS NOT NULL AND ${ownFactEvidenceCondition()} THEN 'f' || p.fact_id::text
           ELSE 'a' || p.article_id END AS gk
         FROM publications p
@@ -72,7 +71,7 @@ export async function loadTimeline(q: TimelineQuery): Promise<Omit<TimelineRespo
   const bind = binding(q);
   let after: { a: number; g: string } | null = null;
   if (q.cursor) {
-    const c = decodeCursor<{ a: number; g: string; b: string }>("tl4", q.cursor);
+    const c = decodeCursor<{ a: number; g: string; b: string }>("tl5", q.cursor);
     if (c.b !== bind || typeof c.a !== "number" || typeof c.g !== "string") throw new InvalidCursorError("cursor does not match this query");
     after = { a: c.a, g: c.g };
   }
@@ -85,13 +84,7 @@ export async function loadTimeline(q: TimelineQuery): Promise<Omit<TimelineRespo
   const page = groups.slice(0, limit);
   const hasMore = groups.length > limit;
 
-  const factIds = page.filter((g) => g.gk.startsWith("f")).map((g) => Number(g.gk.slice(1)));
-  const storyIds = page.filter((g) => g.gk.startsWith("s")).map((g) => Number(g.gk.slice(1)));
-  // A story card is chosen among every fact the story holds, so those facts are read with the page's.
-  const storyFactIds = storyIds.length
-    ? (await sql<{ id: number }[]>`SELECT id FROM facts WHERE story_id IN ${sql(storyIds)}`).map((f) => f.id)
-    : [];
-  const memberFactIds = [...new Set([...factIds, ...storyFactIds])];
+  const memberFactIds = page.filter((g) => g.gk.startsWith("f")).map((g) => Number(g.gk.slice(1)));
   const factById = new Map(
     memberFactIds.length
       ? (await sql<{ id: number; public_id: string; story_id: number | null }[]>`
@@ -118,15 +111,11 @@ export async function loadTimeline(q: TimelineQuery): Promise<Omit<TimelineRespo
       planned.push({ key: g.gk, anchorAt: g.anchor_at.toISOString(), id: g.gk.slice(1), group: null });
       continue;
     }
-    // 's': the event counts as a whole, so the card comes from every fact of the story; 'f': from the one fact.
     const anchorId = Number(g.gk.slice(1));
-    const own = g.gk.startsWith("s")
-      ? new Set([...factById.values()].filter((f) => f.story_id === anchorId).map((f) => f.id))
-      : new Set([anchorId]);
-    const candidates = members.filter((m) => own.has(m.fact_id));
+    const candidates = members.filter((m) => m.fact_id === anchorId);
     if (!candidates.length) continue;
     const rep = pickRepresentative(candidates);
-    const reports = pool.filter((r) => own.has(r.fact_id));
+    const reports = pool.filter((r) => r.fact_id === anchorId);
     const repSource = reports.find((r) => r.article_id === rep.id)?.source_id;
     const group: GroupInfo = {
       factId: factById.get(rep.fact_id)?.public_id ?? String(rep.fact_id),
@@ -152,6 +141,6 @@ export async function loadTimeline(q: TimelineQuery): Promise<Omit<TimelineRespo
   });
 
   const last = page[page.length - 1];
-  const nextCursor = hasMore && last ? encodeCursor("tl4", { a: last.anchor_at.getTime(), g: last.gk, b: bind }) : null;
+  const nextCursor = hasMore && last ? encodeCursor("tl5", { a: last.anchor_at.getTime(), g: last.gk, b: bind }) : null;
   return { filters: { channel: q.channel, category: q.category, tag: q.tag }, cards, nextCursor };
 }

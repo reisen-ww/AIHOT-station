@@ -84,8 +84,13 @@ export async function composeDaily(date: string, reason?: string): Promise<{ key
   const end = beijingAt(date, EDITION_TIMES.daily);
   const start = new Date(end.getTime() - 86400000);
   const edition = await dailyEdition(date, start, end);
-  // An issue with nothing in it is a failure upstream, not a report: the run fails and is caught up later.
-  if (edition.entries.length === 0) throw new Error(`daily ${date}: no selected items in its window`);
+  // A quiet day writes no issue: nothing was selected in its window, so there is nothing to say. The
+  // scheduled run moves on; a day filled in later is still picked up, since the window is asked again.
+  // An explicit regeneration is different: the editor asked for an issue, so an empty one is refused.
+  if (edition.entries.length === 0) {
+    if (reason !== undefined) throw new Error(`daily ${date}: no selected items in its window`);
+    return { key: date, entries: 0 };
+  }
   const issue = arrangeDaily(edition.entries);
   const [lead, ...rest] = issue.main as [EditionEntry, ...EditionEntry[]];
   const content = {
@@ -301,7 +306,7 @@ const nextMonth = (label: string) => {
 export async function composeDueReports(now = new Date(), limit = 8): Promise<{ generated: string[]; failed: string[] }> {
   const generated: string[] = [];
   const failed: string[] = [];
-  const kinds: Array<{ kind: ReportKind; due: string; next: (k: string) => string; compose: (k: string) => Promise<unknown> }> = [
+  const kinds: Array<{ kind: ReportKind; due: string; next: (k: string) => string; compose: (k: string) => Promise<{ entries: number }> }> = [
     { kind: "daily", due: dueDaily(now), next: (k) => addDays(k, 1), compose: composeDaily },
     { kind: "weekly", due: dueWeekly(now), next: nextWeek, compose: composeWeekly },
     { kind: "monthly", due: dueMonthly(now), next: nextMonth, compose: composeMonthly },
@@ -326,8 +331,9 @@ export async function composeDueReports(now = new Date(), limit = 8): Promise<{ 
       if (have.has(key)) continue;
       if (shutdownSignal.signal.aborted || generated.length >= limit) break kinds;
       try {
-        await k.compose(key);
-        generated.push(`${k.kind}:${key}`);
+        // An issue with nothing to carry writes nothing: it is no failure, and it does not spend the run's limit.
+        const { entries } = await k.compose(key);
+        if (entries > 0) generated.push(`${k.kind}:${key}`);
       } catch (error) {
         failed.push(`${k.kind}:${key}`);
         console.error(JSON.stringify({ level: "error", msg: "report failed", report: `${k.kind}:${key}`, error: logError(error) }));

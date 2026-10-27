@@ -123,3 +123,25 @@ Get-ChildItem E:\NEWS\apps\*\apps\api\.env | ForEach-Object {
 ## 已知盲点
 
 `config.json` 的档位与站点 `.env` 的 `LLM_MODEL` 是两套独立记录。正常切换时脚本会同步改写，但**手工改了其中一边不会自动对齐**。巡检时两边都要看。
+
+## 免费中转站进链的门槛（2026-10-27 实测）
+
+一批免费中转（`dzhsmartai` / `kuafushe.cc` / `mzeapi.top` / `wawazz.xyz` / `sub.unsee.you`）实测后只留了 5 个进链。筛选口径和教训：
+
+- **`/v1/models` 能列出不等于能调用**。dzhsmartai 列出 `deepseek-v4.1-flash`、`glm-5.3-flash`、`hy3` 却全部 HTTP 502；wawazz 的 `grok-3-mini-fast`、`grok-4.3` 返回 `is not supported by any configured account in this group`。必须发真实请求验证（第 2 条教训的又一次复现）。
+- **延迟必须可预测**。kuafushe 的 `GLM-5.3-Flash` 3/3 通过但平均 53.5s、最大 89.2s，未进链；mzeapi 的 `grok-4.5` 单次 39.9s，未进链。链尾档一旦慢成这样，`IgnoreNew` 也救不了当轮任务。
+- **单点可用不等于长期可用**。kuafushe 的 `DeepSeek-V4-Flash` 在 10-26 曾进链（`kf-ds-v4-flash`），12:12 切上去、12:30 就 `Service temporarily unavailable` 掉档，**只活了 18 分钟**。所以它这次仍放进链，但排在国产免费档之后，不当唯一退路。
+- 免费额度和可用性会无声变化（第 5 条教训）。这一批里同一家的不同 key、不同模型表现差异极大（unsee 的 key#1 三个模型全 429，key#3 八个模型全通），**按 key 记结论，不要按域名记**。
+
+当前 10 档顺序与理由：
+
+| # | id | 说明 |
+|---|---|---|
+| 1–5 | `sf-*` | 硅基流动，主付费档，长期稳定 |
+| 6 | `unsee-mimo` | 1.7s，最快，免费 |
+| 7 | `unsee-qwen-fn` | 2.5s |
+| 8 | `kf-ds-v4-flash` | 2.4s，但历史上有 18 分钟暴毙记录 |
+| 9 | `unsee-dspro` | 4.1s，质量优先的兜底 |
+| 10 | `unsee-glm53` | 5.2s，链尾 |
+
+链尾只放「慢但能答」的档；**不要把不可预测的档放在链尾**（第 2 条教训）。

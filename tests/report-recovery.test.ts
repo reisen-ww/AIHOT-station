@@ -1,11 +1,12 @@
 // Failure cases: automatic runs rewrite published issues; report/receipt commits split; empty gaps
 // starve later daily/weekly/monthly issues or make a failed run look successful. All use a local model stub.
-import { editionAt, stub, tag } from "./setup.ts";
+import { editionAt, pointModels, stub, tag } from "./setup.ts";
 import assert from "node:assert/strict";
 import { after, before, beforeEach, test } from "node:test";
 import { closeDb, sql } from "@aihot/backend/db";
 import { stopBoss } from "@aihot/backend/jobs/queue";
 import { composeDaily, composeDueReports, composeWeekly, composeMonthly } from "@aihot/backend/reports/compose";
+import { DEFAULTS } from "@aihot/site/models";
 
 const T = tag();
 const SOURCE = `report-recovery-${T}`;
@@ -13,8 +14,7 @@ const answer = async (user: string) => ({ title: user.slice(0, 100), leadParagra
 const provider = await stub(async (_hit, request) => ({
   choices: [{ message: { content: JSON.stringify(await answer(JSON.parse(request.body).messages.at(-1).content)) } }],
 }));
-process.env.DEEPSEEK_BASE_URL = `${provider.url}/v1`;
-process.env.DEEPSEEK_API_KEY = "test-key";
+pointModels(provider.url, ["deepseek-flash", DEFAULTS.report ?? "deepseek-flash"]);
 before(async () => {
   await sql`INSERT INTO sources (id, name, kind, tier) VALUES (${SOURCE}, 'Report recovery', 'rss', 'T1')`;
 });
@@ -75,13 +75,19 @@ test("report publication and its receipt commit together and recovery reuses the
   assert.equal((await sql`SELECT status FROM receipts WHERE subject = 'report:weekly:2024-W18'`)[0]!.status, "completed");
 });
 
-test("empty older gaps cannot starve a later daily, weekly or monthly, and failures remain visible", async () => {
+test("empty older gaps cannot starve a later daily, weekly or monthly, and write no issue of their own", async () => {
   // An older issue carried an item; the days after it are empty. Weeklies and monthlies are compiled from dailies.
   const early = await item("2024-01-23");
   await sql`INSERT INTO reports (kind, key, window_start, window_end, content, generated_at)
     VALUES ('daily', '2024-01-23', now(), now(), ${sql.json({ sections: [{ label: "行业动态", items: [{ itemId: early, title: early }] }] })}, now())`;
   await item("2024-02-02");
-  await assert.rejects(composeDueReports(editionAt("daily", "2024-02-02", 3600)), /reports:/);
+  // A quiet day is no failure: the nine empty days before the later one are skipped without writing anything
+  // and without spending the run's limit, so one run still reaches the daily, the week and the month.
+  const run = await composeDueReports(editionAt("daily", "2024-02-02", 3600));
+  assert.deepEqual([...run.failed], []);
+  for (const key of ["daily:2024-02-02", "weekly:2024-W04", "monthly:2024-01"]) assert.ok(run.generated.includes(key), `${key} was written`);
+  const quiet = await sql`SELECT key FROM reports WHERE kind = 'daily' AND key BETWEEN '2024-01-24' AND '2024-02-01'`;
+  assert.deepEqual([...quiet], []);
   for (const [kind, key] of [["daily", "2024-02-02"], ["weekly", "2024-W04"], ["monthly", "2024-01"]]) {
     assert.ok(await report(kind!, key!), `${kind} ${key} was recovered past the empty gaps`);
   }

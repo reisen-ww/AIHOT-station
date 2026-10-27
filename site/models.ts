@@ -23,7 +23,7 @@ export const PRESETS: Record<string, ModelPreset> = {
   // 恢复后切回（operations/recover.ts）。它也是推理模型（与 default 档 LLM_REASONING_TOKENS 同款）；
   // response_format JSON 模式实测（2026-10-18）可用，返回严格 JSON。
   auto: {
-    service: "llm", model: "auto", baseUrlEnv: "LLM_BASE_URL", apiKeyEnv: "LLM_API_KEY",
+    service: "llm", model: "Qwen/Qwen2.5-7B-Instruct", baseUrlEnv: "LLM_BASE_URL", apiKeyEnv: "LLM_API_KEY",
     reasoningTokens: 4000, jsonMode: true,
   },
   // GLM 5.3 Flash always reasons; the lowest effort keeps short structured tasks fast.
@@ -61,10 +61,31 @@ export const PRESETS: Record<string, ModelPreset> = {
     service: "dashscope", model: "qwen3-vl-flash", baseUrlEnv: "DASHSCOPE_BASE_URL", apiKeyEnv: "DASHSCOPE_API_KEY",
     extra: { enable_thinking: false }, jsonMode: false, vision: true,
   },
+  // 硅基流动免费档的推理模型：会先思考再答，适合评分、理解、摘要、日报这类要判断的步骤。
+  "sf-glm-z1-9b": {
+    service: "siliconflow", model: "THUDM/GLM-Z1-9B-0414", baseUrlEnv: "LLM_BASE_URL", apiKeyEnv: "LLM_API_KEY",
+    reasoningTokens: 4000, jsonMode: true,
+  },
+  "sf-qwen3-8b": {
+    service: "siliconflow", model: "Qwen/Qwen3-8B", baseUrlEnv: "LLM_BASE_URL", apiKeyEnv: "LLM_API_KEY",
+    extra: { enable_thinking: true }, reasoningTokens: 4000, jsonMode: true,
+  },
+  "sf-ds-r1-8b": {
+    service: "siliconflow", model: "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B", baseUrlEnv: "LLM_BASE_URL", apiKeyEnv: "LLM_API_KEY",
+    reasoningTokens: 4000, jsonMode: true,
+  },
+  "sf-qwen25-14b": {
+    service: "siliconflow", model: "Qwen/Qwen2.5-14B-Instruct", baseUrlEnv: "LLM_BASE_URL", apiKeyEnv: "LLM_API_KEY",
+    reasoningTokens: 4000, jsonMode: true,
+  },
 };
 
 /**
  * 每一步默认用的模型（步骤见后台“模型与评测”页），值是上面的名字或 default。没写的步骤用 default。
  * 例：{ score: "glm-5.3-flash-selection", groupReview: "mimo-v2.6-flash" }
  */
-export const DEFAULTS: Record<string, string> = {};
+export const DEFAULTS: Record<string, string> = {
+  score: "sf-glm-z1-9b",
+  digest: "sf-glm-z1-9b",
+  report: "sf-glm-z1-9b",
+};

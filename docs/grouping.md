@@ -75,3 +75,13 @@ node --env-file=.env scripts/eval-relations.ts \
 token 用量和平均耗时按报告引用的回执对应的全部请求尝试汇总，包括之前解析失败的响应；同一张回执不会因为多条样本重复计算。用已有结果重跑时仍显示这些历史用量，不代表这次新增的费用。
 
 CI 检查 JSONL 解析、固定种子的抽样、各项指标，以及本地假模型服务下的并发复用和重试用量统计，不访问外部模型服务。
+
+## 时间线卡片怎么分
+
+精选/时间线（`packages/backend/src/publication/timeline.ts`）把报道折叠成卡片时，语义是**每个事实一张卡片，只有重复报道才合并**：
+
+- 一个事实（fact）有自己的证据时，出一张 `f{factId}` 卡片，该事实下的重复报道折进这张卡；
+- 没有独立事实的独立报道或对其他事件的“提及”，各自出一张 `a{articleId}` 卡片；
+- 同一事件（story）的后续进展**不会**被折叠成一张“故事卡”——即使报道挂着同一个 story_id，每个事实仍然单独出卡。
+
+卡片粒度属于游标契约的一部分：分组规则变化时递增游标版本（当前 `tl5`），让客户端旧游标安全失效、从头重读。改分组逻辑前先跑 `tests/timeline-day-counts.test.ts`、`tests/timeline-group-scope.test.ts` 和 `tests/content-publication.test.ts`，这三个测试是卡片语义的规范。
