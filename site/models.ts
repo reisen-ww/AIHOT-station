@@ -87,6 +87,9 @@ export const PRESETS: Record<string, ModelPreset> = {
  */
 export const DEFAULTS: Record<string, string> = {
   score: "sf-glm-z1-9b",
+  // 内容理解要按骨架案枚举填 itemType；7B 小模型会把中文分类名（如「财报」）当成类型，
+  // 校验不过即 ModelOutputError，三振成终态。改用会先想的模型。
+  understand: "sf-glm-z1-9b",
   digest: "sf-glm-z1-9b",
   report: "sf-glm-z1-9b",
 };
