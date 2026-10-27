@@ -62,21 +62,22 @@ export const PRESETS: Record<string, ModelPreset> = {
     extra: { enable_thinking: false }, jsonMode: false, vision: true,
   },
   // 硅基流动免费档的推理模型：会先思考再答，适合评分、理解、摘要、日报这类要判断的步骤。
+  // 免费档只有文本模型（没有视觉）：带图文章进 understand 时自动改走纯文本提示。
   "sf-glm-z1-9b": {
     service: "siliconflow", model: "THUDM/GLM-Z1-9B-0414", baseUrlEnv: "LLM_BASE_URL", apiKeyEnv: "LLM_API_KEY",
-    reasoningTokens: 4000, jsonMode: true,
+    reasoningTokens: 4000, jsonMode: true, vision: false,
   },
   "sf-qwen3-8b": {
     service: "siliconflow", model: "Qwen/Qwen3-8B", baseUrlEnv: "LLM_BASE_URL", apiKeyEnv: "LLM_API_KEY",
-    extra: { enable_thinking: true }, reasoningTokens: 4000, jsonMode: true,
+    extra: { enable_thinking: true }, reasoningTokens: 4000, jsonMode: true, vision: false,
   },
   "sf-ds-r1-8b": {
     service: "siliconflow", model: "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B", baseUrlEnv: "LLM_BASE_URL", apiKeyEnv: "LLM_API_KEY",
-    reasoningTokens: 4000, jsonMode: true,
+    reasoningTokens: 4000, jsonMode: true, vision: false,
   },
   "sf-qwen25-14b": {
     service: "siliconflow", model: "Qwen/Qwen2.5-14B-Instruct", baseUrlEnv: "LLM_BASE_URL", apiKeyEnv: "LLM_API_KEY",
-    reasoningTokens: 4000, jsonMode: true,
+    reasoningTokens: 4000, jsonMode: true, vision: false,
   },
 };
 
