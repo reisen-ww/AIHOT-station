@@ -9,7 +9,7 @@ import { after, before, test } from "node:test";
 import { closeDb, sql } from "@aihot/backend/db";
 import { upsertMaterial } from "@aihot/backend/content/materials";
 import { groupArticle } from "@aihot/backend/events/group";
-import { BatchSchema, PairSchema, verdictsByFact, type CandidateView } from "@aihot/backend/events/relate";
+import { BatchSchema, PairSchema, completeDecisions, verdictsByFact, type CandidateView } from "@aihot/backend/events/relate";
 import { detachFromFact, requestRegroup } from "@aihot/backend/events/corrections";
 import { sweepUngrouped } from "@aihot/backend/jobs/events";
 import { enqueue, getBoss, QUEUES, stopBoss } from "@aihot/backend/jobs/queue";
@@ -61,6 +61,12 @@ test("missing and invalid identity answers cannot silently assert unrelated", ()
   const cands = [{ factId: 1 }, { factId: 2 }] as CandidateView[];
   assert.throws(() => verdictsByFact([{ id: "C1", relation: "UNRELATED", confidence: 1 }], cands), /candidate|候选/i);
   assert.throws(() => verdictsByFact([{ id: "C1", relation: "UNRELATED", confidence: 1 }, { id: "C1", relation: "UNRELATED", confidence: 1 }], cands), /candidate|候选/i);
+  // 模型顺手回答背景行 R1 不该让整批答案作废；候选仍须一对一。
+  assert.equal(completeDecisions([{ id: "C1" }, { id: "R1" }], 1), true);
+  assert.equal(completeDecisions([{ id: "C1" }, { id: "R1" }], 2), false);
+  const single = [{ factId: 7 }] as CandidateView[];
+  assert.deepEqual([...verdictsByFact([{ id: "C1", relation: "UNRELATED", confidence: 1 }, { id: "R2", relation: "ROUNDUP", confidence: 1 }], single).keys()], [7]);
+  assert.equal(PairSchema.safeParse({ relation: "same occurrence", confidence: 0.9 }).success, true);
 });
 
 for (const composite of [false, true]) test(`a ${composite ? "roundup" : "single report"} with an incomplete answer stays unresolved and can recover`, async () => {

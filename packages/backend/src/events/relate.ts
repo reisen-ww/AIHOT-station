@@ -65,12 +65,16 @@ export const BATCH_SYSTEM = promptText("group-batch");
 export const PAIR_SYSTEM = promptText("group-pair");
 export const SIGNAL_SYSTEM = promptText("group-signal");
 
-const RelationSchema = z.enum(RELATIONS);
+/** A relation label as the model writes it: capitals, spaces and hyphens vary between models. */
+const RelationSchema = z.preprocess(
+  (value) => (typeof value === "string" ? value.trim().toUpperCase().replace(/[\s-]+/g, "_") : value),
+  z.enum(RELATIONS),
+);
 
 export const BatchSchema = z.object({
   query: z.string().max(400).catch(""),
   decisions: z
-    .array(z.object({ id: z.string().regex(/^C[1-9]\d*$/), relation: RelationSchema, confidence: z.number().min(0).max(1), note: z.string().max(400).catch("") })),
+    .array(z.object({ id: z.string().max(20), relation: RelationSchema, confidence: z.number().min(0).max(1), note: z.string().max(400).catch("") })),
   selection: z.object({ addsValue: z.boolean(), reason: z.string().trim().min(1).max(400) }),
 });
 
@@ -89,7 +93,7 @@ export const PairSchema = z.object({
 });
 
 export const SignalSchema = z.object({
-  decisions: z.array(z.object({ id: z.string().regex(/^C[1-9]\d*$/), relation: RelationSchema, confidence: z.number().min(0).max(1) })),
+  decisions: z.array(z.object({ id: z.string().max(20), relation: RelationSchema, confidence: z.number().min(0).max(1) })),
 });
 
 function when(at: Date | null): string {
@@ -135,10 +139,22 @@ export function pairUser(a: ReportView, b: ReportView): string {
   return `${describeReport(a, "报道 A")}\n\n${describeReport(b, "报道 B")}\n\n这两篇报道是什么关系？`;
 }
 
-/** An identity answer must address every supplied candidate exactly once. */
+/** The candidate a decision names, or null when it names anything else (a reading background row R1..Rn). */
+function candidateIndex(id: string, count: number): number | null {
+  const n = Number(String(id).trim().replace(/^C/i, ""));
+  return Number.isInteger(n) && n >= 1 && n <= count ? n - 1 : null;
+}
+
+/** Every supplied candidate needs exactly one decision; a decision that names no candidate is ignored. */
 export function completeDecisions(decisions: Array<{ id: string }>, count: number): boolean {
-  const ids = new Set(decisions.map(d => d.id));
-  return decisions.length === count && ids.size === count && Array.from({ length: count }, (_, i) => candidateKey(i)).every(id => ids.has(id));
+  const seen = new Set<number>();
+  for (const d of decisions) {
+    const index = candidateIndex(d.id, count);
+    if (index === null) continue;
+    if (seen.has(index)) return false;
+    seen.add(index);
+  }
+  return seen.size === count;
 }
 
 /** Verdicts by fact id; missing answers are failures, never assertions of unrelatedness. */
@@ -146,8 +162,8 @@ export function verdictsByFact(decisions: Array<{ id: string; relation: Relation
   if (!completeDecisions(decisions, cands.length)) throw new Error("Identity answer must cover every candidate exactly once");
   const out = new Map<number, Verdict>();
   for (const d of decisions) {
-    const n = Number(String(d.id).trim().replace(/^C/i, ""));
-    const c = Number.isInteger(n) ? cands[n - 1] : undefined;
+    const index = candidateIndex(d.id, cands.length);
+    const c = index === null ? undefined : cands[index];
     if (c && !out.has(c.factId)) out.set(c.factId, { relation: d.relation, confidence: d.confidence, note: d.note ?? "" });
   }
   return out;
