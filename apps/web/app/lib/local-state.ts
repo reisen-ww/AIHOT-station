@@ -3,14 +3,16 @@
 // Storage failures degrade silently.
 import { useEffect, useSyncExternalStore } from "react";
 import { beijingDate } from "@aihot/contracts/time";
+import { STATIC_SITE, STATIC_STATION } from "./deployment.ts";
+
+const readerKey = (key: string) => STATIC_SITE ? `${key}:${STATIC_STATION}` : key;
 
 export const KEYS = {
-  starred: "aihot-starred-items",
-  read: "aihot-read-items",
+  starred: readerKey("aihot-starred-items"),
+  read: readerKey("aihot-read-items"),
   theme: "aihot-theme",
-  changelogSeen: "aihot-changelog-seen-version",
-  feedbackDraft: "aihot-feedback-draft-v1",
-  recentSearches: "aihot-recent-searches",
+  changelogSeen: readerKey("aihot-changelog-seen-version"),
+  recentSearches: readerKey("aihot-recent-searches"),
 } as const;
 
 const STARRED_LIMIT = 500;
@@ -369,7 +371,7 @@ export function clearRecentSearches() {
 }
 
 // the page the reader was on (feedback records where a problem was seen)
-const LAST_PAGE_KEY = "aihot:last-page";
+const LAST_PAGE_KEY = readerKey("aihot:last-page");
 const NOT_A_PLACE = /^\/(feedback|more)(\/|$)|^\/admin(\/|$)/;
 
 /** Called on every in-site navigation: remembers the latest real page, never feedback, "更多" or the admin. */
@@ -382,16 +384,17 @@ export function lastPage(): string | null {
   return v && v.startsWith("/") && !v.startsWith("//") ? v : null;
 }
 
-// export / import (version 1)
+// Existing per-origin files remain v1; shared-origin Pages files carry their station in v2.
 export interface ExportBundle {
-  version: 1;
+  version: 1 | 2;
+  station?: string;
   starred: LocalStarredItem[];
   read: string[];
   theme: ThemeChoice | "auto" | null;
 }
 
 export function exportBundle(): ExportBundle {
-  return { version: 1, starred: getStarred(), read: getReadIds(), theme: getThemePreference() };
+  return { version: STATIC_SITE ? 2 : 1, ...(STATIC_SITE ? { station: STATIC_STATION } : {}), starred: getStarred(), read: getReadIds(), theme: getThemePreference() };
 }
 
 export interface ImportReport {
@@ -405,7 +408,7 @@ export interface ImportReport {
 }
 
 /** Merge: existing stars are not overwritten, read ids are unioned, theme only if unset. */
-export function importBundle(text: string): ImportReport {
+export function importBundle(text: string, legacyStationConfirmed = false): ImportReport {
   if (text.length > IMPORT_MAX_CHARS) throw new Error("文件过大（上限 2,000,000 字符）");
   let data: unknown;
   try {
@@ -414,7 +417,9 @@ export function importBundle(text: string): ImportReport {
     throw new Error("不是有效的 JSON 文件");
   }
   const d = data as Partial<ExportBundle>;
-  if (!d || typeof d !== "object" || d.version !== 1) throw new Error("文件格式不对（需要 version: 1）");
+  if (!d || typeof d !== "object" || (d.version !== 1 && d.version !== 2)) throw new Error("文件格式不对（需要 version: 1 或 2）");
+  if (d.version === 2 && d.station !== STATIC_STATION) throw new Error("这个文件来自另一个站点，请到对应站点导入。");
+  if (STATIC_SITE && d.version === 1 && !legacyStationConfirmed) throw new Error("旧文件没有站点标记，需要先确认它来自本站。");
   return mergeLocalData({
     starred: Array.isArray(d.starred) ? d.starred : [],
     read: Array.isArray(d.read) ? d.read : [],
@@ -472,7 +477,8 @@ function mergeLocalData(incoming: { starred: unknown[]; read: unknown[]; theme: 
     const imported = typeof incoming.theme === "string" ? asTheme(incoming.theme) : null;
     let themeApplied = false;
     if (imported !== null && imported !== getThemePreference()) {
-      themeApplied = writeRaw(KEYS.theme, imported);
+      const cookieSaved = writeThemeCookie(imported);
+      themeApplied = writeRaw(KEYS.theme, imported) || cookieSaved;
     }
     cache.clear();
     emit();
@@ -482,6 +488,15 @@ function mergeLocalData(incoming: { starred: unknown[]; read: unknown[]; theme: 
 
 /** Imports from elsewhere (the site's modules') merge through the same path. */
 export { mergeLocalData };
+
+/** Old Pages versions shared a key across stations. Preserve it; never guess which station owns it. */
+export function legacyReaderBackup(): string | null {
+  if (!STATIC_SITE) return null;
+  const starred = readJson("aihot-starred-items");
+  const read = readJson("aihot-read-items");
+  return (Array.isArray(starred) && starred.length) || (Array.isArray(read) && read.length)
+    ? JSON.stringify({ version: 1, starred: Array.isArray(starred) ? starred : [], read: Array.isArray(read) ? read : [], theme: getThemePreference() }, null, 2) : null;
+}
 
 // React hooks
 const EMPTY_STARRED: LocalStarredItem[] = [];

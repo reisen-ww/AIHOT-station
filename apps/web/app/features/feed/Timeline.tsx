@@ -16,7 +16,8 @@ import { monthDay, weekdayShort } from "../../lib/format";
 import { isHydrated } from "../../lib/hydration";
 import { markRead, useReadSet } from "../../lib/local-state";
 import { filterParams, listPath } from "../../lib/seo";
-import { isReload, readSnapshot, restoreAnchor, saveSnapshot, useSaveOnLeave } from "../../lib/restore";
+import { isReload, readSnapshot, restoreAnchor, saveSnapshot, snapshotKey, useSaveOnLeave } from "../../lib/restore";
+import { siteFetch } from "../../lib/site-fetch";
 
 const AUTO_BATCHES = 3;
 
@@ -128,14 +129,14 @@ export function Timeline({ initial, filters, layout = "timeline" }: { initial: T
   const location = useLocation();
   const navigation = useNavigation();
   const readSet = useReadSet();
-  const historyKey = location.key;
+  const historyKey = snapshotKey(location);
 
   // Back navigation (client side): restore synchronously from the snapshot. A full reload restores
   // after hydration so the first client render matches the server HTML.
   const [state, setState] = useState<ListState>(() => {
     if (isHydrated()) {
-      const snap = readSnapshot<ListState>(historyKey);
-      if (snap?.data.version === 2 && snap.data.cards.length > 0) return snap.data;
+      const snap = readSnapshot<ListState | null>(historyKey);
+      if (snap?.data?.version === 2 && snap.data.cards.length > 0) return snap.data;
     }
     return fromResponse(initial);
   });
@@ -160,8 +161,8 @@ export function Timeline({ initial, filters, layout = "timeline" }: { initial: T
       pageRequest.current = null;
       setLoadingMore(false);
       setLoadError(false);
-      const snap = readSnapshot<ListState>(historyKey);
-      if (snap?.data.version === 2 && snap.data.cards.length > 0) {
+      const snap = readSnapshot<ListState | null>(historyKey);
+      if (snap?.data?.version === 2 && snap.data.cards.length > 0) {
         setState(snap.data);
         restoreAnchor(snap.anchor, snap.scrollY);
       } else {
@@ -187,22 +188,22 @@ export function Timeline({ initial, filters, layout = "timeline" }: { initial: T
   useLayoutEffect(() => {
     if (restoredRef.current) return;
     restoredRef.current = true;
-    const snap = readSnapshot<ListState>(historyKey);
+    const snap = readSnapshot<ListState | null>(historyKey);
     if (!isHydrated()) {
       // A full load keeps the server's fresh list when the reader reloaded; after a back/forward
       // that reloaded the document, it restores the saved list and position.
-      if (snap?.data.version === 2 && snap.data.cards.length > 0 && !isReload()) {
+      if (snap?.data?.version === 2 && snap.data.cards.length > 0 && !isReload()) {
         setState(snap.data);
         requestAnimationFrame(() => restoreAnchor(snap.anchor, snap.scrollY));
       }
       return;
     }
-    if (snap?.data.version === 2 && snap.data.cards.length > 0) restoreAnchor(snap.anchor, snap.scrollY);
+    if (snap?.data?.version === 2 && snap.data.cards.length > 0) restoreAnchor(snap.anchor, snap.scrollY);
   }, [historyKey]);
 
   // Save the snapshot whenever we leave this history entry.
   useEffect(() => {
-    if (navigation.state === "loading" && navigation.location && navigation.location.key !== historyKey) {
+    if (navigation.state === "loading" && navigation.location && snapshotKey(navigation.location) !== historyKey) {
       saveSnapshot(historyKey, stateRef.current);
     }
   }, [navigation.state, navigation.location, historyKey]);
@@ -218,10 +219,10 @@ export function Timeline({ initial, filters, layout = "timeline" }: { initial: T
     setLoadingMore(true);
     setLoadError(false);
     try {
-      const res = await fetch(listPath("/api/site/timeline", { ...filterParams(filters), cursor: s.nextCursor }), { signal: controller.signal });
+      const res = await siteFetch(listPath("/api/site/timeline", { ...filterParams(filters), cursor: s.nextCursor }), { signal: controller.signal });
       if (res.status === 400) {
         // Cursor no longer fits: start over from the head.
-        const head = await fetch(key, { signal: controller.signal });
+        const head = await siteFetch(key, { signal: controller.signal });
         if (!head.ok) throw new Error(String(head.status));
         if (current()) setState(fromResponse((await head.json()) as TimelineResponse));
         return;

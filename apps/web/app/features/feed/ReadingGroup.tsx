@@ -9,6 +9,7 @@ import { monthDayTime } from "../../lib/format";
 import { isReload } from "../../lib/restore";
 import { listPath, filterParams } from "../../lib/seo";
 import { sessionCache } from "../../lib/session-cache";
+import { siteFetch } from "../../lib/site-fetch";
 
 const reportsUrl = (factId: string, filters: TimelineFilters | undefined) =>
   listPath(`/api/site/groups/${encodeURIComponent(factId)}/reports`, filters ? filterParams(filters) : {});
@@ -45,7 +46,7 @@ function useReports(url: string, saved: GroupReport[] | null = null) {
     const controller = (request.current = new AbortController());
     setState((s) => ({ url, reports: s.url === url ? s.reports : null, loading: true, error: false }));
     try {
-      const res = await fetch(url, { signal: controller.signal });
+      const res = await siteFetch(url, { signal: controller.signal });
       if (!res.ok && !(again && res.status === 404)) throw new Error(String(res.status));
       const reports = res.ok ? ((await res.json()) as GroupReportsResponse).reports : [];
       if (!controller.signal.aborted) setState({ url, reports, loading: false, error: false });

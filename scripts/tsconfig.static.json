@@ -1,0 +1,7 @@
+{
+  "extends": "../tsconfig.base.json",
+  "include": ["build-static.ts", "export-static.ts", "static-*.ts"],
+  "compilerOptions": {
+    "lib": ["DOM", "ES2024"]
+  }
+}

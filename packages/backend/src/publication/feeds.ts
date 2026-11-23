@@ -15,6 +15,7 @@ import { publicCategoryCondition, exportTranslation, xView, type ItemRow } from 
 import { publicSourceName } from "./rules.ts";
 import { listedCondition, seatedCondition } from "./scope.ts";
 import { dailyUrl, itemUrl, periodUrl, siteUrl } from "./links.ts";
+import { itemWindow, livePublicationRead, type PublicationRead } from "./read.ts";
 
 interface FeedMeta {
   id: string;
@@ -147,7 +148,9 @@ export type ItemFeedKind = "selected" | "selected-full" | "all";
 /** A reminder for the feed at a path, or none (routes/feeds.ts asks the modules). */
 type NoticeFor = (feedPath: string) => FeedNotice | null;
 
-export async function itemFeed(kind: ItemFeedKind, category: PublicApiCategoryKey | null, { now = new Date(), notice }: { now?: Date; notice?: NoticeFor } = {}): Promise<string> {
+export async function itemFeed(kind: ItemFeedKind, category: PublicApiCategoryKey | null, { now = new Date(), notice }: { now?: Date; notice?: NoticeFor } = {}, read: PublicationRead = { ...livePublicationRead(), now }): Promise<string> {
+  const sql = read.db;
+  now = read.now;
   const includeContent = kind === "selected-full";
   const scope = kind === "all"
     ? sql`${listedCondition(now)} AND coalesce(p.published_at, p.discovered_at) > ${now}::timestamptz - interval '7 days'
@@ -156,7 +159,7 @@ export async function itemFeed(kind: ItemFeedKind, category: PublicApiCategoryKe
         ${category ? sql`AND coalesce(p.published_at, p.discovered_at) >= ${new Date(now.getTime() - 7 * 86400_000)}` : sql``}`;
   const rows = await sql<FeedRow[]>`
     WITH page AS MATERIALIZED (
-      SELECT p.article_id FROM publications p WHERE ${scope}
+      SELECT p.article_id FROM publications p WHERE ${scope} ${itemWindow(read)}
       ORDER BY coalesce(p.published_at, p.discovered_at) DESC, p.article_id DESC LIMIT 50
     )
     SELECT p.article_id AS id, p.title, p.summary, p.url, p.category, p.published_at, s.name AS source_name
@@ -210,10 +213,10 @@ function issueXml(kind: ReportKind, r: FeedIssue): string {
 }
 
 /** The daily, weekly or monthly feed: one item per issue, newest first. */
-export async function reportFeed(kind: ReportKind, notice?: NoticeFor): Promise<string> {
+export async function reportFeed(kind: ReportKind, notice?: NoticeFor, read: PublicationRead = livePublicationRead(), project?: (issue: FeedIssue) => FeedIssue): Promise<string> {
   const m = feedMeta(kind);
   const meta = { title: m.title, description: m.description, homePath: m.homePath, selfPath: m.path, ttl: m.pollHintMinutes };
-  const items = (await feedIssues(kind, ISSUES_KEPT[kind])).map((r) => issueXml(kind, r));
+  const items = (await feedIssues(kind, ISSUES_KEPT[kind], read)).map((r) => issueXml(kind, project ? project(r) : r));
   const first = notice?.(meta.selfPath);
   if (first) items.unshift(noticeXml(first));
   return channel(meta, items);

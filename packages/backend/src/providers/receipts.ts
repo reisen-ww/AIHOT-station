@@ -9,6 +9,7 @@
 import { sql, type Db } from "../db.ts";
 import { sha256, stableJson } from "../lib/ids.ts";
 import { shutdownSignal } from "../lib/shutdown.ts";
+import { capacityPaused } from "../config.ts";
 
 export class BudgetExceededError extends Error {
   readonly service: string;
@@ -17,6 +18,12 @@ export class BudgetExceededError extends Error {
     super(`Budget for ${service} exhausted (${window})`);
     this.service = service;
     this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
+export class CapacityPausedError extends Error {
+  constructor(message = "Database capacity guard is paused") {
+    super(message);
   }
 }
 
@@ -130,6 +137,7 @@ export async function paidRequest(req: ReceiptRequest, call: () => Promise<CallO
     const [existing] = await tx<ReceiptRow[]>`
       SELECT id, status, response, created_at, updated_at FROM receipts WHERE logical_key = ${logicalKey} FOR UPDATE`;
     if (existing?.status === "received" || existing?.status === "completed") return { kind: "reuse" as const, row: existing };
+    if (capacityPaused) throw new CapacityPausedError();
     // Finish business writes from saved answers during shutdown, but never reserve or send the
     // next paid page/batch. An answer already in flight still saves below, without this check.
     shutdownSignal.signal.throwIfAborted();

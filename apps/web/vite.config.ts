@@ -5,6 +5,21 @@ import { defineConfig, type Plugin } from "vite";
 import { isApiOwned, resolveRedirect } from "@aihot/contracts/http-policy";
 import { DEPLOYMENT } from "@aihot/site";
 import { proxyToApi } from "./app/lib/api-proxy.server.ts";
+import { staticBuildConfig } from "../../scripts/static-config.ts";
+
+const snapshot = staticBuildConfig();
+
+function staticReads(): Plugin {
+  const api = path.resolve(import.meta.dirname, "app/lib/api").replaceAll("\\", "/");
+  return {
+    name: "aihot-static-public-reads", enforce: "pre",
+    resolveId(id, importer) {
+      if (!importer || !id.startsWith(".")) return;
+      const resolved = path.resolve(path.dirname(importer.split("?")[0]), id).replaceAll("\\", "/").replace(/\.ts$/, "");
+      if (resolved === api) return path.resolve(import.meta.dirname, "app/lib/static-api.ts");
+    },
+  };
+}
 
 /** Development stand-in for the production web server: the shared redirect table and api-owned path routing. */
 function devEdge(): Plugin {
@@ -34,7 +49,19 @@ function devEdge(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [devEdge(), tailwindcss(), reactRouter()],
+  plugins: [snapshot ? staticReads() : devEdge(), tailwindcss(), reactRouter()],
+  ...(snapshot ? {
+    envDir: false,
+    base: `${snapshot.base}/`,
+    define: {
+      "import.meta.env.VITE_STATION_STATIC": JSON.stringify("1"),
+      "import.meta.env.VITE_SITE_BASE": JSON.stringify(snapshot.base.slice(0, snapshot.base.lastIndexOf("/"))),
+      "import.meta.env.VITE_STATIC_BASE": JSON.stringify(snapshot.base),
+      "import.meta.env.VITE_STATIC_STATION": JSON.stringify(snapshot.station),
+      "import.meta.env.VITE_STATIC_SITE_URL": JSON.stringify(snapshot.siteUrl),
+      __STATIC_META__: JSON.stringify({ changelogVersion: null, release: snapshot.manifest.revision, articleWindow: snapshot.manifest.window ?? null }),
+    },
+  } : { define: { __STATIC_META__: "null" } }),
   // The modules' pages import the engine's web code by this name (tsconfig.json paths).
   resolve: { alias: { "@aihot/web/": `${path.resolve(import.meta.dirname, "app")}/` } },
   server: { port: 3000, strictPort: true },

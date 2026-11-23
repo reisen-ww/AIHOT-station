@@ -263,6 +263,8 @@ export type ReportKind = "daily" | "weekly" | "monthly";
 
 export interface ReportCitation {
   itemId: string | null;
+  /** Stable public citation identity when a static window has no local article detail. Never a link. */
+  citationId?: string;
   title: string;
   summary: string | null;
   sourceName: string;
@@ -393,8 +395,10 @@ export interface StoryFollowupsResponse { items: StoryFollowup[]; more: boolean 
  * source name of the day they were saved; a public item also brings the name shown today.
  */
 export interface ItemAvailability {
-  status: "public" | "summary-only" | "unavailable";
+  status: "public" | "summary-only" | "unavailable" | "outside-window";
   sourceName?: string;
+  /** An out-of-window public original, never supplied for withdrawn/unknown articles. */
+  originalUrl?: string;
 }
 
 /** An issue in the archive and the calendar, numbered in its whole series; closed daily months omit their titles. */

@@ -3,7 +3,9 @@ import { Await, isRouteErrorResponse, Link, useAsyncError, useLoaderData, useNav
 import type { Route } from "./+types/item";
 import type { FeedItemSummary, SiteItemDetail } from "@aihot/contracts/site";
 import { ITEM_COPY, SITE } from "@aihot/site";
-import { edgeTtl, loadOr404 } from "../lib/api.server";
+import { edgeTtl, loadOr404 } from "../lib/api";
+import { markdownPath } from "../lib/deployment";
+import { siteFetch } from "../lib/site-fetch";
 import { articleLd, breadcrumbLd, pageMeta, siteUrl, titled } from "../lib/seo";
 import { fullDateTime, relativeTime } from "../lib/format";
 import { markRead } from "../lib/local-state";
@@ -226,13 +228,14 @@ function ItemGone() {
   const error = useAsyncError();
   const revalidator = useRevalidator();
   const gone = isRouteErrorResponse(error) && error.status === 404;
+  const outside = (isRouteErrorResponse(error) || error instanceof Response) && error.status === 410;
   return (
     <div className="mx-auto max-w-sm pb-8">
       <PhoneBar back={{ to: "/", label: "精选" }} />
       <div className="py-24 text-center">
-        <div className="text-[20px] font-bold text-ink">{gone ? "这里没有内容" : "暂时无法加载"}</div>
-        <p className="mt-2 text-[13.5px] leading-relaxed text-ink-3">{gone ? "这篇内容不存在，或已不再公开。" : "服务暂时繁忙，请稍后再试。"}</p>
-        {!gone && (
+        <div className="text-[20px] font-bold text-ink">{outside ? "已超出当前在线窗口" : gone ? "这里没有内容" : "暂时无法加载"}</div>
+        <p className="mt-2 text-[13.5px] leading-relaxed text-ink-3">{outside ? "这篇历史文章未包含在本版在线窗口，并非来源撤回。收藏和历史报告仍然保留。" : gone ? "这篇内容不存在，或已不再公开。" : "服务暂时繁忙，请稍后再试。"}</p>
+        {!gone && !outside && (
           <button type="button" onClick={() => void revalidator.revalidate()} className="mt-6 h-11 rounded-full border border-line-strong bg-surface px-5 text-[14px] font-medium text-ink-2 active:bg-bg-sunk">
             重试
           </button>
@@ -271,7 +274,7 @@ function ItemView({ item }: { item: SiteItemDetail }) {
   };
   const copyMarkdown = async () => {
     try {
-      const res = await fetch(`/items/${item.id}/markdown`);
+      const res = await siteFetch(`/items/${item.id}/markdown`);
       if (!res.ok) throw new Error(String(res.status));
       await navigator.clipboard.writeText(await res.text());
       setToast("Markdown 已复制");
@@ -315,7 +318,7 @@ function ItemView({ item }: { item: SiteItemDetail }) {
             (inWeChat() ? (
               <MenuItem icon={<IconDownload size={15} />} onSelect={() => { close(); void copyMarkdown(); }}>复制 Markdown</MenuItem>
             ) : (
-              <MenuItem icon={<IconDownload size={15} />} href={`/items/${item.id}/markdown`} download onSelect={close}>
+              <MenuItem icon={<IconDownload size={15} />} href={markdownPath(item.id)} download onSelect={close}>
                 导出 Markdown
               </MenuItem>
             ))}
@@ -330,7 +333,7 @@ function ItemView({ item }: { item: SiteItemDetail }) {
     ...(item.markdownAvailable
       ? [inWeChat()
         ? { key: "markdown", label: "复制 Markdown", icon: <IconDownload size={20} />, onSelect: () => void copyMarkdown() }
-        : { key: "markdown", label: "导出 Markdown", icon: <IconDownload size={20} />, href: `/items/${item.id}/markdown`, download: true }]
+        : { key: "markdown", label: "导出 Markdown", icon: <IconDownload size={20} />, href: markdownPath(item.id), download: true }]
       : []),
   ];
   // Desktop actions head the right rail, one row as tall as 返回 at the head of the left one.
@@ -592,7 +595,7 @@ function ItemView({ item }: { item: SiteItemDetail }) {
 
       {posterRequested && (
         <Suspense fallback={null}>
-          <PosterSheet id={item.id} title={item.title} open={posterOpen} onClose={closePoster} />
+          <PosterSheet item={item} open={posterOpen} onClose={closePoster} />
         </Suspense>
       )}
       <Toast text={toast} />

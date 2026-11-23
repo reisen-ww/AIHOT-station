@@ -87,7 +87,8 @@ interface SourceClock {
 }
 
 /** Scheduled sources and their last successful fetch (screenshot-reported and pushed sources cannot visibly fall behind). */
-export async function sourceClocks(): Promise<SourceClock[]> {
+export async function sourceClocks(db: Db = sql): Promise<SourceClock[]> {
+  const sql = db;
   const rows = await sql<{ id: string; last_ok_at: Date | null; interval_minutes: number }[]>`
     SELECT id, last_ok_at, interval_minutes FROM sources WHERE enabled AND kind IN ('rss', 'web_list', 'json_list', 'x_search')`;
   return rows.map((r) => ({ id: r.id, lastOk: r.last_ok_at?.getTime() ?? null, graceMs: Math.max(r.interval_minutes * 3, 90) * 60_000 }));
@@ -307,7 +308,8 @@ export async function snapshotHeat(at = new Date()): Promise<{ stories: number; 
  * sources were all collecting before the first plotted hour's window began, so the line compares like
  * with like across the whole plot. No such participant: no line.
  */
-export async function heatSeries(storyId: number, now = new Date(), days = 7): Promise<Array<{ hour: Date; heat: number; participants: number }>> {
+export async function heatSeries(storyId: number, now = new Date(), days = 7, db: Db = sql): Promise<Array<{ hour: Date; heat: number; participants: number }>> {
+  const sql = db;
   const hours = (await sql<{ hour: Date }[]>`
     SELECT hour FROM story_heat_hourly WHERE story_id = ${storyId} AND complete AND hour > ${new Date(now.getTime() - days * 86400_000)} AND hour <= ${now}
     ORDER BY hour`).map((h) => h.hour.getTime());

@@ -6,6 +6,7 @@ import { sql } from "../db.ts";
 import { cached } from "../lib/cache.ts";
 import { publicSourceName } from "../publication/rules.ts";
 import { selectedCondition } from "../publication/scope.ts";
+import { itemWindow, livePublicationRead, type PublicationRead } from "../publication/read.ts";
 
 export type { SiteStats };
 
@@ -14,11 +15,12 @@ const SAMPLE = 180;
 
 const stats = cached(() => querySiteStats(new Date()), { freshMs: 10 * 60_000, maxStaleMs: 60 * 60_000 });
 
-export function loadSiteStats(): Promise<SiteStats> {
-  return stats.get();
+export function loadSiteStats(read?: PublicationRead): Promise<SiteStats> {
+  return read ? querySiteStats(read.now, read) : stats.get();
 }
 
-async function querySiteStats(now: Date): Promise<SiteStats> {
+async function querySiteStats(now: Date, read: PublicationRead = livePublicationRead()): Promise<SiteStats> {
+  const sql = read.db;
   const dayAgo = new Date(now.getTime() - 24 * 3600_000);
   const [[row], kinds, sample, latest] = await Promise.all([
     sql<Array<Omit<SiteStats, "sourceKinds" | "day" | "sampleSources" | "latest"> & { collected: number; selectedDay: number }>>`
@@ -35,7 +37,7 @@ async function querySiteStats(now: Date): Promise<SiteStats> {
       ORDER BY md5(id::text || ${now.toISOString().slice(0, 10)}), id LIMIT ${SAMPLE}`,
     sql<{ id: string; title: string; source: string }[]>`
       SELECT p.article_id AS id, p.title, s.name AS source FROM publications p JOIN sources s ON s.id = p.source_id
-      WHERE ${selectedCondition(now)} ORDER BY p.timeline_at DESC, p.article_id DESC LIMIT 8`,
+      WHERE ${selectedCondition(now)} ${itemWindow(read)} ORDER BY p.timeline_at DESC, p.article_id DESC LIMIT 8`,
   ]);
   const { collected, selectedDay, ...totals } = row!;
   const value: SiteStats = {

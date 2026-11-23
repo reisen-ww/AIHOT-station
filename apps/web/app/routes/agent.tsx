@@ -3,7 +3,7 @@ import { Link, useLoaderData, useNavigate, useSearchParams } from "react-router"
 import type { Route } from "./+types/agent";
 import { PUBLIC_INTERFACE_VERSION } from "@aihot/contracts/http-policy";
 import { SITE } from "@aihot/site";
-import { apiGet, edgeTtl } from "../lib/api.server";
+import { apiGet, edgeTtl } from "../lib/api";
 import { listPath, pageMeta, siteUrl } from "../lib/seo";
 import { IconArrowUpRight, IconChevronRight, IconCode, IconPlug, IconRss } from "../components/icons";
 import { Kicker } from "../components/ui/Kicker";
@@ -13,6 +13,8 @@ import { ApiPanel, McpPanel, mcpToolCount, RssPanel } from "../features/agent/pa
 import type { AgentTrack } from "../modules";
 import { PhoneBar } from "../components/shell/PhoneBar";
 import type { Screen } from "../components/shell/screens";
+import { STATIC_SITE, sitePath } from "../lib/deployment";
+import { StaticPanel } from "../features/agent/StaticPanel";
 
 export const handle: Screen = { tab: "me", name: "Agent 接入" };
 
@@ -23,7 +25,10 @@ export function headers() {
 const V = PUBLIC_INTERFACE_VERSION;
 
 /** The ways in, the modules' first. The chooser's cards are the tabs: `?tab=` (the first is the default and not written). */
-const TRACKS: AgentTrack[] = [
+const TRACKS: AgentTrack[] = STATIC_SITE ? [
+  { key: "snapshot", name: "公开快照", short: "文件", pitch: "下载完整历史，在本地查询", fit: "脚本、Agent、离线索引", icon: IconCode, Panel: StaticPanel },
+  { key: "rss", name: "RSS", short: "RSS", pitch: "复制地址，用阅读器订阅", fit: "Reeder、Folo、Inoreader、n8n", icon: IconRss, Panel: RssPanel },
+] : [
   ...AGENT_PARTS.flatMap((p) => p.tracks ?? []),
   { key: "mcp", name: "MCP", short: "MCP", pitch: `填一个地址，多出 ${mcpToolCount()} 个工具`, fit: "Claude 桌面版、Cursor 等远程 MCP 客户端", icon: IconPlug, Panel: McpPanel },
   { key: "rss", name: "RSS", short: "RSS", pitch: "复制地址，用阅读器订阅", fit: "Reeder、Folo、Inoreader、n8n", icon: IconRss, Panel: RssPanel },
@@ -44,7 +49,11 @@ const ANCHORS = new Map([
 const anchorHref = (id: string) => `${hrefOf(ANCHORS.get(id)!)}#${id}`;
 
 /** Machine-readable entry points, with what each one is for. */
-const RESOURCES: Array<[label: string, href: string, note: string]> = [
+const RESOURCES: Array<[label: string, href: string, note: string]> = STATIC_SITE ? [
+  ["llms.txt", "/llms.txt", "给大模型读的站点说明"],
+  ["Agent 使用说明", "/agent/index.md", "Markdown 与完整历史读取方式"],
+  ["文件接口说明", "/openapi-static.json", "仅描述实际提供的静态资源"],
+] : [
   ["llms.txt", "/llms.txt", "给大模型读的站点说明"],
   ["Agent 使用说明", "/api/v1/agent", `Agent 读了就能查${GUIDE_CLIENTS ? `，${GUIDE_CLIENTS} 用的也是它` : ""}`],
   ["OpenAPI 3.1", "/openapi-v1.json", `REST API 的完整定义 · ${V}`],
@@ -124,7 +133,7 @@ export default function AgentPage() {
             return (
               <a
                 key={t.key}
-                href={hrefOf(t.key)}
+                href={sitePath(hrefOf(t.key))}
                 onClick={(e) => {
                   e.preventDefault();
                   select(t.key);
@@ -144,7 +153,7 @@ export default function AgentPage() {
       <AsideCard title="接入资源">
         <nav aria-label="接入资源" className="-mx-2 -mb-1">
           {RESOURCES.map(([l, h, note]) => (
-            <a key={h} href={h} target={h.startsWith("http") ? "_blank" : undefined} rel="noopener noreferrer" className="group flex items-start gap-2 rounded-control px-2 py-2 transition-colors hover:bg-bg-sunk">
+            <a key={h} href={sitePath(h)} target={h.startsWith("http") ? "_blank" : undefined} rel="noopener noreferrer" className="group flex items-start gap-2 rounded-control px-2 py-2 transition-colors hover:bg-bg-sunk">
               <span className="min-w-0 flex-1">
                 <span className="block text-[13.5px] text-ink-2 group-hover:text-ink">{l}</span>
                 <span className="mt-0.5 block text-[12px] text-ink-4">{note}</span>
@@ -153,12 +162,6 @@ export default function AgentPage() {
             </a>
           ))}
         </nav>
-      </AsideCard>
-      <AsideCard title="没接上？">
-        <p className="text-[13px] leading-[1.75] text-ink-3">把平台、版本和报错写在反馈页，别发 token 或本地文件。</p>
-        <Link viewTransition to="/feedback" prefetch="intent" className="mt-3 inline-flex items-center gap-1 text-[13px] font-medium text-accent hover:underline">
-          去反馈 <IconChevronRight size={14} />
-        </Link>
       </AsideCard>
     </>
   );
@@ -174,7 +177,7 @@ export default function AgentPage() {
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <span className={`${chip} ${healthy ? "text-ok" : "text-hot"}`}>
             <span className={`size-1.5 rounded-full ${healthy ? "bg-ok" : "bg-hot"}`} aria-hidden="true" />
-            {healthy ? "服务正常" : "服务异常"}
+            {healthy ? STATIC_SITE ? "快照可读取" : "服务正常" : "暂时无法读取"}
           </span>
           <span className={chip}>版本 <span className="mono text-ink-2">{V}</span></span>
           <span className={chip}>匿名只读 · 无需 Key</span>
@@ -189,7 +192,7 @@ export default function AgentPage() {
           return (
             <a
               key={t.key}
-              href={hrefOf(t.key)}
+              href={sitePath(hrefOf(t.key))}
               role="tab"
               id={`agent-tab-${t.key}`}
               aria-selected={on}

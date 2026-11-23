@@ -16,6 +16,11 @@ export interface ListSnapshot<T> {
 
 const snapshots = sessionCache<ListSnapshot<unknown>>(PREFIX, MAX_AGE_MS);
 
+/** New documents can share the router's "default" key; a position never belongs to another list URL. */
+export function snapshotKey(location: { key: string; pathname: string; search: string }): string {
+  return JSON.stringify([location.key, location.pathname, location.search]);
+}
+
 /**
  * True when this document was loaded by the reader's reload. A reload asks for the latest list (the
  * home page has no "new items" prompt), so it never restores a saved list; back and forward do.

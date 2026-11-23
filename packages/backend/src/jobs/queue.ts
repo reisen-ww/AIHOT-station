@@ -3,7 +3,7 @@
 // and both sides are checked against JobData, so a payload cannot drift between producer and consumer.
 // A module declares its own queues (modules.ts ModuleQueue), typed by the queue in the same way.
 import { PgBoss, type SendOptions, type WorkOptions } from "pg-boss";
-import { config } from "../config.ts";
+import { capacityPaused, config } from "../config.ts";
 import { sql, type Db } from "../db.ts";
 import { shutdownSignal } from "../lib/shutdown.ts";
 import { logError } from "../lib/log-error.ts";
@@ -102,6 +102,7 @@ function queueDb(tx: Db) {
 
 /** Enqueues a job. With `tx`, the job commits atomically with the caller's business write. */
 export async function enqueue<Q extends QueueName>(name: Q, data: JobData[Q], options: SendOptions = {}, tx?: Db): Promise<string | null> {
+  if (capacityPaused) return null;
   await ensureQueue(name);
   const b = await getBoss();
   return b.send(name, data, tx ? { ...options, db: queueDb(tx) } : options);
@@ -109,6 +110,7 @@ export async function enqueue<Q extends QueueName>(name: Q, data: JobData[Q], op
 
 /** Enqueues a job on a module's queue. With `tx`, the job commits atomically with the caller's business write. */
 export async function enqueueOn<T extends object>(queue: ModuleQueue<T>, data: T, options: SendOptions = {}, tx?: Db): Promise<string | null> {
+  if (capacityPaused) return null;
   await ensureQueue(queue.name, queue.options);
   const b = await getBoss();
   return b.send(queue.name, data, tx ? { ...options, db: queueDb(tx) } : options);

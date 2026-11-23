@@ -9,18 +9,20 @@ import { proxiedImage, proxiedImageSet } from "../media/imgproxy.ts";
 import { publicSourceName } from "./rules.ts";
 import { evidenceCondition, listedCondition } from "./scope.ts";
 import { storyTexts } from "./story-text.ts";
+import { itemWindow, livePublicationRead, type PublicationRead } from "./read.ts";
 
 // Concurrent reads are shared, nothing more: public words follow withdrawals and regrouping at once.
-const ranking = cached(queryLatestHotRanking, SHARED_ONLY);
+const ranking = cached(() => queryLatestHotRanking(), SHARED_ONLY);
 
-export function latestHotRanking(): Promise<HotRanking | null> {
-  return ranking.get();
+export function latestHotRanking(read?: PublicationRead): Promise<HotRanking | null> {
+  return read ? queryLatestHotRanking(read) : ranking.get();
 }
 
-async function queryLatestHotRanking(): Promise<HotRanking | null> {
-  const row = await storedHotRanking();
+async function queryLatestHotRanking(read: PublicationRead = livePublicationRead()): Promise<HotRanking | null> {
+  const sql = read.db;
+  const row = await storedHotRanking(sql);
   if (!row) return null;
-  const now = new Date();
+  const now = read.now;
   const entries = row.entries;
   const current = entries.length ? await sql<{ story_id: number; article_id: string; story_title: string; url: string; source_name: string; latest_at: Date }[]>`
     SELECT DISTINCT ON (f.story_id, p.article_id) f.story_id, p.article_id, st.title AS story_title, p.url, s.name AS source_name,
@@ -30,10 +32,11 @@ async function queryLatestHotRanking(): Promise<HotRanking | null> {
     JOIN LATERAL (
       SELECT max(coalesce(p.published_at, p.discovered_at)) AS at
       FROM facts f JOIN fact_articles fa ON fa.fact_id = f.id JOIN publications p ON p.article_id = fa.article_id
-      WHERE f.story_id = st.id AND ${evidenceCondition()} AND ${listedCondition(now)}
+      WHERE f.story_id = st.id AND ${evidenceCondition()} AND ${listedCondition(now)} ${itemWindow(read)}
     ) latest ON true
     WHERE f.story_id IN ${sql(entries.map((entry) => entry.storyId))} AND p.article_id IN ${sql(entries.map((entry) => entry.representativeItemId ?? ""))}
       AND ${evidenceCondition()} AND ${listedCondition(now)}
+      ${itemWindow(read)}
     ORDER BY f.story_id, p.article_id, (fa.role = 'primary') DESC, f.id` : [];
   const valid = new Map(current.map((report) => [`${report.story_id}:${report.article_id}`, report]));
   // Regrouping can invalidate a saved representative before the next heat refresh. Do not link the
@@ -52,7 +55,8 @@ interface Extras {
 
 const readExtras = cachedByKey((ranking: HotRanking) => String(ranking.id), queryExtras, { ...SHARED_ONLY, maxKeys: 4 });
 
-async function queryExtras(ranking: HotRanking): Promise<Extras> {
+async function queryExtras(ranking: HotRanking, read: PublicationRead = livePublicationRead()): Promise<Extras> {
+  const sql = read.db;
   const ids = ranking.entries.map((e) => e.storyId);
   const [faces, texts] = await Promise.all([
     // A participant's face: the source's icon, else the avatar on that account's latest post in the story.
@@ -63,7 +67,7 @@ async function queryExtras(ranking: HotRanking): Promise<Extras> {
       LEFT JOIN articles a ON a.id = CASE WHEN s.icon_url IS NULL THEN ss.article_id END AND a.x_post ? 'avatarUrl'
       WHERE ss.story_id = ANY(${ids}::bigint[])
       ORDER BY s.id, (a.id IS NULL), a.discovered_at DESC, a.id DESC`,
-    storyTexts(ids),
+    storyTexts(ids, read.now, sql),
   ]);
   return {
     faces: new Map(faces.map((f) => [f.name, f.icon_url ?? f.avatar])),
@@ -75,8 +79,8 @@ async function queryExtras(ranking: HotRanking): Promise<Extras> {
  * What the web adds to a ranking entry: participants with proxied faces in the order Faces shows them
  * (精选组 by tier, a real face before an initial within a tier, then 氛围组), the digest and the latest turn.
  */
-export async function rankingExtras(ranking: HotRanking) {
-  const { faces, texts } = await readExtras(ranking);
+export async function rankingExtras(ranking: HotRanking, read?: PublicationRead) {
+  const { faces, texts } = await (read ? queryExtras(ranking, read) : readExtras(ranking));
   return {
     participants: (e: HotEntry): HotParticipant[] => {
       const people = e.participants
@@ -104,10 +108,10 @@ export async function rankingExtras(ranking: HotRanking) {
 }
 
 /** Home "current hot" strip: 3–5 entries from the same ranking, hidden when there are fewer than 3. */
-export async function loadHotStrip(): Promise<HotStripEntry[] | null> {
-  const ranking = await latestHotRanking();
+export async function loadHotStrip(read?: PublicationRead): Promise<HotStripEntry[] | null> {
+  const ranking = await latestHotRanking(read);
   if (!ranking || ranking.entries.length < 3) return null;
-  const extras = await rankingExtras(ranking);
+  const extras = await rankingExtras(ranking, read);
   return ranking.entries.slice(0, 5).map((e) => ({
     rank: e.rank,
     title: e.title,

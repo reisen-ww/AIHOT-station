@@ -12,6 +12,7 @@ import { PillTabs } from "../../components/ui/Tabs";
 import type { AgentPanelProps } from "../../modules";
 import { AGENT_PARTS, GUIDE_CLIENTS, TAG } from "./module-parts";
 import { Address, Ask, Block, Bullets, Details, Mono, PanelHead, Step, Steps, Table, Tips } from "./parts";
+import { STATIC_SITE, sitePath } from "../../lib/deployment";
 
 const V = PUBLIC_INTERFACE_VERSION;
 
@@ -95,7 +96,7 @@ export function McpPanel(props: AgentPanelProps) {
                 ...AGENT_PARTS.flatMap((a) => a.mcpTroubles ?? []),
                 "服务不需要登录；客户端问起 OAuth 或 API Key，选“无”即可。",
                 "收到 429 就按提示等一会儿，不要并发重试。",
-                <>还连不上：把客户端名称、版本和报错写到<Link viewTransition to="/feedback" className={link}>反馈页</Link>。</>,
+                "仍无法连接时，核对客户端版本和报错，不要在排查信息中附上 token 或本地私密文件。",
               ]} />
             ),
           },
@@ -155,7 +156,7 @@ export function RssPanel(props: AgentPanelProps) {
       </Block>
 
       <Block title="刷新多快合适">
-        <p>阅读器会带着上次的 ETag 来问，内容没变时只回一个很小的 304，不重复下载。30 分钟刷新一次就够，更快也拿不到新的内容。</p>
+        <p>{STATIC_SITE ? "正常每两小时生成并校验一轮，有变化才发布。阅读器按缓存规则刷新；历史内容可从公开快照继续读取，不受 RSS 的近期条数限制。" : "阅读器会带着上次的 ETag 来问，内容没变时只回一个很小的 304，不重复下载。30 分钟刷新一次就够，更快也拿不到新的内容。"}</p>
         <p className="mt-3 text-[13px] text-ink-3">{`条目链接指向站内阅读页，原文链接在摘要里。能匿名订阅不等于所有用途都获许可${POLICY.terms.notes ? `：${POLICY.terms.notes.rss}` : ""}，见`}<Link viewTransition to="/terms" className={link}>{POLICY.terms.name}</Link>。</p>
       </Block>
     </>
@@ -179,7 +180,7 @@ export function ApiPanel(props: AgentPanelProps) {
   return (
     <>
       <PanelHead label={`REST API · ${V}`} title="匿名 GET，拿来就能用">
-        不用 token；浏览器跨域、curl 和各语言默认的 HTTP 客户端都能直接调。路径是 /api/v1，字段和错误码以 <a href="/openapi-v1.json" className={link}>OpenAPI</a> 为准。
+        不用 token；浏览器跨域、curl 和各语言默认的 HTTP 客户端都能直接调。路径是 /api/v1，字段和错误码以 <a href={sitePath("/openapi-v1.json")} className={link}>OpenAPI</a> 为准。
       </PanelHead>
       <CodeBlock className="mt-6" title="第一个请求" lang="bash" code={`${curl} '${items}'`} />
 

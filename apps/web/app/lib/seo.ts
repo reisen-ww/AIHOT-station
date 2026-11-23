@@ -5,12 +5,15 @@ import type { MetaDescriptor } from "react-router";
 import type { ReportDetail, TimelineFilters } from "@aihot/contracts/site";
 import { isCategoryKey, isChannelKey } from "@aihot/contracts/taxonomy";
 import { SITE, subjectAfter, withSubject } from "@aihot/site";
+import { STATIC_SITE } from "./deployment.ts";
 
 /**
  * The site's address: SITE_URL while rendering on the server (what crawlers and share previews read),
- * the page's own origin in the browser.
+ * the page's own origin in the dynamic browser. Static shares always use the configured public URL,
+ * including isolated previews: a downloaded poster must never send another reader to localhost.
  */
 export function siteUrl(): string {
+  if (STATIC_SITE) return import.meta.env.VITE_STATIC_SITE_URL;
   if (typeof window !== "undefined") return window.location.origin;
   return (process.env.SITE_URL || SITE.defaultUrl).replace(/\/+$/, "");
 }

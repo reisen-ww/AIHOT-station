@@ -3,12 +3,14 @@ import { Link, useLocation } from "react-router";
 import type { ItemAvailability } from "@aihot/contracts/site";
 import { SITE } from "@aihot/site";
 import { Presence } from "../components/ui/Presence";
-import { edgeTtl } from "../lib/api.server";
+import { edgeTtl } from "../lib/api";
+import { siteFetch } from "../lib/site-fetch";
 import { pageMeta } from "../lib/seo";
-import { exportBundle, importBundle, removeStar, useStarred, type ImportReport } from "../lib/local-state";
+import { exportBundle, importBundle, legacyReaderBackup, removeStar, useStarred, type ImportReport } from "../lib/local-state";
+import { STATIC_SITE } from "../lib/deployment";
 import { fullDateTime } from "../lib/format";
 import { IconBookmark, IconDownload, IconClose } from "../components/icons";
-import { readSnapshot, restoreAnchor, useSaveOnLeave } from "../lib/restore";
+import { readSnapshot, restoreAnchor, snapshotKey, useSaveOnLeave } from "../lib/restore";
 import { PhoneBar } from "../components/shell/PhoneBar";
 import type { Screen } from "../components/shell/screens";
 import { webModules } from "../site-modules";
@@ -36,8 +38,9 @@ export default function StarredPage() {
   const [mounted, setMounted] = useState(false);
   const [availability, setAvailability] = useState<Record<string, ItemAvailability>>({});
   const [notice, setNotice] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
+  const [legacy, setLegacy] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  useEffect(() => setMounted(true), []);
+  useEffect(() => { setMounted(true); setLegacy(legacyReaderBackup()); }, []);
 
   const starredIds = starred.map((s) => s.id).join(",");
   useEffect(() => {
@@ -49,7 +52,7 @@ export default function StarredPage() {
     for (let i = 0; i < ids.length; i += 100) batches.push(ids.slice(i, i + 100));
     Promise.all(
       batches.map((batch) =>
-        fetch(`/api/site/items/availability?ids=${encodeURIComponent(batch.join(","))}`, { signal: controller.signal })
+        siteFetch(`/api/site/items/availability?ids=${encodeURIComponent(batch.join(","))}`, { signal: controller.signal })
           .then((r) => (r.ok ? (r.json() as Promise<Record<string, ItemAvailability>>) : {}))
           .catch(() => ({})),
       ),
@@ -61,7 +64,7 @@ export default function StarredPage() {
 
   // Back from an item: the list renders only after mounting (it lives in this browser), so the
   // position comes back once it is there, by the same card anchor the other lists use.
-  const historyKey = useLocation().key;
+  const historyKey = snapshotKey(useLocation());
   useLayoutEffect(() => {
     if (!mounted || starred.length === 0) return;
     const snap = readSnapshot<null>(historyKey);
@@ -69,19 +72,25 @@ export default function StarredPage() {
   }, [mounted, historyKey]);
   useSaveOnLeave(historyKey, () => null);
 
-  const doExport = () => {
-    const blob = new Blob([JSON.stringify(exportBundle(), null, 2)], { type: "application/json" });
+  const download = (text: string, name: string) => {
+    const blob = new Blob([text], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `${SITE.mcpPrefix}-local-data-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = name;
     a.click();
     URL.revokeObjectURL(a.href);
   };
+  const doExport = () => download(JSON.stringify(exportBundle(), null, 2), `${SITE.mcpPrefix}-local-data-${new Date().toISOString().slice(0, 10)}.json`);
 
   const doImport = async (file: File | undefined) => {
     if (!file) return;
     try {
-      const report = importBundle(await file.text());
+      const text = await file.text();
+      const parsed = JSON.parse(text) as { version?: unknown };
+      const legacyConfirmed = STATIC_SITE && parsed?.version === 1
+        ? window.confirm(`这是没有站点标记的旧文件。你确认其中的收藏和已读记录来自 ${SITE.name} 吗？不确定请取消，原文件不会改动。`) : false;
+      if (STATIC_SITE && parsed?.version === 1 && !legacyConfirmed) return;
+      const report = importBundle(text, legacyConfirmed);
       setNotice({ kind: report.readFailed ? "error" : "ok", text: `导入完成：${reportText(report)}` });
     } catch (e) {
       setNotice({ kind: "error", text: e instanceof Error ? e.message : "导入失败" });
@@ -122,6 +131,10 @@ export default function StarredPage() {
         </div>
       </header>
       <p className="rounded-tile border border-line bg-surface px-4 py-2.5 text-[12.5px] text-ink-3">收藏只保存在当前浏览器；清除浏览器数据或换设备后不会同步。</p>
+      {legacy && <div className="mt-3 rounded-tile border border-line bg-surface px-4 py-3 text-[12.5px] text-ink-3">
+        <p>检测到旧版未标记站点的收藏或已读记录。原记录已保留，未自动混入本站；请先备份，再确认所属站点后导入。</p>
+        <button type="button" className="mt-2 text-accent underline" onClick={() => download(legacy, "hot-pages-legacy-local-data.json")}>备份旧记录</button>
+      </div>}
       <Presence show={!!notice} enter="anim-notice-in" exit="anim-fade-out" duration={160}>
         <div
           role="status"
@@ -147,6 +160,7 @@ export default function StarredPage() {
             const current = availability[s.id];
             const status = current?.status;
             const unavailable = status === "unavailable";
+            const outside = status === "outside-window";
             return (
               <li key={s.id} data-card-key={s.id} className={`relative border-b border-line-soft py-4 lg:card lg:px-[18px] lg:py-[15px] ${unavailable ? "opacity-70" : "lg:card-hover"}`}>
                 <div className="flex items-center gap-2 text-[12.5px] text-ink-4">
@@ -160,7 +174,7 @@ export default function StarredPage() {
                   </button>
                 </div>
                 <h2 className="mt-1.5 text-[16px] font-[650] leading-[1.55] text-ink">
-                  {unavailable ? (
+                  {unavailable || outside ? (
                     s.title
                   ) : (
                     <Link viewTransition to={`/items/${s.id}`} className="transition-colors after:absolute after:inset-0 after:content-[''] hover:text-accent">
@@ -170,6 +184,7 @@ export default function StarredPage() {
                 </h2>
                 {s.summary && <p className="mt-1.5 line-clamp-2 text-[14px] leading-[1.75] text-ink-3">{s.summary}</p>}
                 {unavailable && <p className="mt-2 text-[12.5px] text-hot">这条内容已不再公开，收藏会保留直到你手动移除。</p>}
+                {outside && <p className="mt-2 text-[12.5px] text-ink-3">这条内容已超出当前在线窗口，并非来源撤回；收藏仍然保留。{current.originalUrl && <a className="relative z-10 ml-1 text-accent underline" href={current.originalUrl} target="_blank" rel="noopener noreferrer">阅读原文</a>}</p>}
                 {status === "summary-only" && <p className="mt-2 text-[12.5px] text-amber-ink">应来源方要求，这条内容现在只提供摘要。</p>}
               </li>
             );

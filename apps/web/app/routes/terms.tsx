@@ -1,6 +1,6 @@
 import { POLICY, SITE } from "@aihot/site";
 import copy from "@aihot/site/pages/terms.md?raw";
-import { edgeTtl } from "../lib/api.server";
+import { edgeTtl } from "../lib/api";
 import { pageMeta } from "../lib/seo";
 import { prepareCopy } from "../lib/site-copy";
 import { CopyPage, LegalFooterLinks } from "../features/copy/CopyPage";
@@ -32,7 +32,7 @@ export default function TermsPage() {
             { to: "/agent", label: "Agent 接入页" },
             ...webModules().flatMap((m) => m.termsLinks ?? []),
           ]}
-          note={`${POLICY.terms.name} ${TERMS.doc.meta["版本"] ?? ""} · ${TERMS.doc.meta["生效日期"] ?? ""}`}
+          note={[POLICY.terms.name, TERMS.doc.meta["版本"], TERMS.doc.meta["生效日期"]].filter(Boolean).join(" · ")}
         />
       }
     />

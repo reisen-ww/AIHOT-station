@@ -197,12 +197,13 @@ export function exportTranslation(a: { language?: string | null; body_text?: str
  * For listed rows that are selected but yield their fact's seat: the report holding it, by row id.
  * (The home timeline folds these into reading groups; flat lists say which report stands for them.)
  */
-export async function seatHolders(rows: ItemRow[], now: Date, db: Db = sql): Promise<Map<string, { id: string; title: string }>> {
+export async function seatHolders(rows: ItemRow[], now: Date, db: Db = sql, itemIds?: readonly string[]): Promise<Map<string, { id: string; title: string }>> {
   const yielding = rows.filter((r) => r.selected && !r.seat && r.fact_id !== null);
   if (!yielding.length) return new Map();
   const holders = await db<{ fact_id: number; id: string; title: string }[]>`
     SELECT p.fact_id, p.article_id AS id, p.title FROM publications p
-    WHERE p.fact_id IN ${db([...new Set(yielding.map((r) => r.fact_id!))])} AND ${seatedCondition(now)}`;
+    WHERE p.fact_id IN ${db([...new Set(yielding.map((r) => r.fact_id!))])} AND ${seatedCondition(now)}
+      ${itemIds ? db`AND p.article_id = ANY(${[...itemIds]}::text[])` : db``}`;
   const byFact = new Map(holders.map((h) => [Number(h.fact_id), { id: h.id, title: h.title }]));
   return new Map(yielding.flatMap((r) => (byFact.has(Number(r.fact_id)) ? [[r.id, byFact.get(Number(r.fact_id))!] as const] : [])));
 }

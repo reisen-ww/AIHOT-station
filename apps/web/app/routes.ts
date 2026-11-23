@@ -1,6 +1,7 @@
 import { type RouteConfig, type RouteConfigEntry, index, layout, route } from "@react-router/dev/routes";
 import type { ModulePage } from "@aihot/contracts/modules";
 import { MODULES } from "@aihot/site/modules";
+import { wrapStaticRoutes } from "../../../scripts/static-routes.ts";
 
 /** A module's route module, from the app directory. */
 const file = (module: string, path: string) => `../../../modules/${module}/${path}`;
@@ -12,7 +13,7 @@ const modulePages: RouteConfigEntry[] = MODULES.flatMap((m) =>
 );
 const moduleAdminPages: RouteConfigEntry[] = MODULES.flatMap((m) => (m.adminPages ?? []).map((p) => page(m.name, p)));
 
-export default [
+const routes = [
   index("routes/home.tsx"),
   route("all", "routes/all.tsx"),
   route("all/search-busy", "routes/search-busy.tsx", { id: "all-search-busy" }),
@@ -35,7 +36,6 @@ export default [
   route("terms", "routes/terms.tsx"),
   route("privacy", "routes/privacy.tsx"),
   route("changelog", "routes/changelog.tsx"),
-  route("feedback", "routes/feedback.tsx"),
   route("more", "routes/more.tsx"),
   route("starred", "routes/starred.tsx"),
   route("agent", "routes/agent.tsx"),
@@ -58,3 +58,10 @@ export default [
     ...moduleAdminPages,
   ]),
 ] satisfies RouteConfig;
+
+export default process.env.AIHOT_STATIC_BUILD === "1" ? wrapStaticRoutes([
+  ...routes,
+  // Existing Markdown files are served as files. Missing old downloads still explain the window.
+  route("items/:id/export.md", "routes/item.tsx", { id: "static-markdown-missing" }),
+  route("items/:id/markdown", "routes/item.tsx", { id: "static-markdown-legacy" }),
+], import.meta.dirname + "/..") : routes;

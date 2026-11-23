@@ -1,7 +1,7 @@
 import { data as withHeaders, redirect, useLoaderData } from "react-router";
 import type { Route } from "./+types/home";
 import type { TimelineResponse } from "@aihot/contracts/site";
-import { apiDeadlineCache, loadOr404 } from "../lib/api.server";
+import { apiDeadlineCache, loadOr404 } from "../lib/api";
 import { filterParams, itemListLd, listPath, pageMeta, readFilters, siteLd } from "../lib/seo";
 import type { Screen } from "../components/shell/screens";
 import { Timeline } from "../features/feed/Timeline";

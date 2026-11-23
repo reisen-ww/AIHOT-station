@@ -1,6 +1,6 @@
 import type { Route } from "./+types/item-original";
 import type { SiteItemDetail } from "@aihot/contracts/site";
-import { loadOr404 } from "../lib/api.server";
+import { loadOr404 } from "../lib/api";
 export { default, handle, headers, meta } from "./item";
 
 export async function loader({ params, request }: Route.LoaderArgs) {

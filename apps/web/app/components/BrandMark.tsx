@@ -1,5 +1,6 @@
 import type { Brand } from "@aihot/contracts/site";
 import { webModules } from "../site-modules";
+import { sitePath } from "../lib/deployment";
 
 /** A company's, vendor's or evaluator's mark on a bordered tile; falls back to a monogram. Marks identify, never endorse. */
 export function BrandMark({ brand, size = 28, className = "" }: { brand: Brand | null; size?: number; className?: string }) {
@@ -13,7 +14,7 @@ export function BrandMark({ brand, size = 28, className = "" }: { brand: Brand |
         style={{ width: size, height: size, borderRadius: radius }}
         aria-hidden="true"
       >
-        <img src={brand.src} alt="" width={size} height={size} loading="lazy" decoding="async" className={`object-contain ${dark ? "h-[66%] w-[66%]" : "h-[64%] w-[64%]"}`} />
+        <img src={sitePath(brand.src)} alt="" width={size} height={size} loading="lazy" decoding="async" className={`object-contain ${dark ? "h-[66%] w-[66%]" : "h-[64%] w-[64%]"}`} />
       </span>
     );
   }

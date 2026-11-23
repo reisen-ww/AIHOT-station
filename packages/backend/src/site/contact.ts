@@ -8,6 +8,7 @@ import { ABOUT } from "@aihot/site";
 import { REPO_ROOT } from "../config.ts";
 import { sql } from "../db.ts";
 import { proxiedImage } from "../media/imgproxy.ts";
+import { livePublicationRead, type PublicationRead } from "../publication/read.ts";
 
 export interface ContactSettings {
   wechatQr: string | null;
@@ -24,13 +25,15 @@ function packCode(slot: "wechat" | "feishu"): string | null {
 
 const DEFAULTS: ContactSettings = { wechatQr: packCode("wechat"), feishuQr: packCode("feishu") };
 
-export async function loadContact(): Promise<ContactSettings> {
+export async function loadContact(read: PublicationRead = livePublicationRead()): Promise<ContactSettings> {
+  const sql = read.db;
   const [row] = await sql<{ value: Partial<ContactSettings> }[]>`SELECT value FROM settings WHERE key = 'contact_qr'`;
   return { ...DEFAULTS, ...(row?.value ?? {}) };
 }
 
 /** The maker's avatar at 400px through the image proxy, or null without a maker source or icon. */
-export async function loadMakerAvatar(): Promise<string | null> {
+export async function loadMakerAvatar(read: PublicationRead = livePublicationRead()): Promise<string | null> {
+  const sql = read.db;
   const sourceId = ABOUT.maker?.avatarSourceId;
   if (!sourceId) return null;
   const [row] = await sql<{ icon_url: string | null }[]>`SELECT icon_url FROM sources WHERE id = ${sourceId}`;

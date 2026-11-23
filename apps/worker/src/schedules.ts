@@ -19,6 +19,7 @@ import { recoverStaleWork } from "@aihot/backend/operations/recover";
 import { forwardPendingFeedback } from "@aihot/backend/operations/feedback";
 import { backupConfigured, runBackup } from "@aihot/backend/operations/backup";
 import { sourceHealthWeekly } from "@aihot/backend/operations/reports";
+import { capacityPaused } from "@aihot/backend/config";
 
 const collecting = process.env.COLLECT_ENABLED === "true";
 
@@ -46,7 +47,7 @@ const ENGINE_SCHEDULES: Scheduled[] = [
   { name: "feedback.forward", cron: "*/10 * * * *", run: () => forwardPendingFeedback() },
   ...(backupConfigured() ? [{ name: "ops.backup", cron: "10 4 * * *", missed: "once" as const, run: () => runBackup() }] : []),
   { name: "reports.source-health", cron: "0 9 * * 1", missed: "once", run: () => sourceHealthWeekly() },
-  ...(collecting
+  ...(collecting && !capacityPaused
     ? [
         { name: "sources.schedule", cron: "* * * * *", run: () => scheduleDueSources() },
         { name: "sources.adapt-intervals", cron: "20 4 * * *", run: adaptIntervals },
@@ -55,11 +56,18 @@ const ENGINE_SCHEDULES: Scheduled[] = [
       ]
     : []),
   // WeChat official accounts through Dajiala (paid), each once per its interval; only with its key.
-  ...(collecting && dajialaConfigured() ? [{ name: "sources.mp-reconcile", cron: "*/15 * * * *", run: () => scheduleMpReconcile() }] : []),
+  ...(collecting && !capacityPaused && dajialaConfigured() ? [{ name: "sources.mp-reconcile", cron: "*/15 * * * *", run: () => scheduleMpReconcile() }] : []),
 ];
 
+// Low-capacity mode keeps existing reports readable, writes due reports from already stored material,
+// and runs deletion-only retention. Every schedule that collects, scores, ranks, sends, backs up or
+// expands caches is unscheduled until the phone has crossed the recovery watermarks.
+const CAPACITY_SAFE_SCHEDULES = new Set(["reports.compose", "ops.retention"]);
+
 export async function registerSchedules(boss: PgBoss) {
-  const schedules = [...ENGINE_SCHEDULES, ...serverModules().flatMap((m) => m.schedules ?? []).filter((s) => s.when?.() ?? true)];
+  const moduleSchedules = serverModules().flatMap((m) => m.schedules ?? []).filter((s) => s.when?.() ?? true);
+  const allSchedules = [...ENGINE_SCHEDULES, ...moduleSchedules];
+  const schedules = capacityPaused ? allSchedules.filter((s) => CAPACITY_SAFE_SCHEDULES.has(s.name)) : allSchedules;
   for (const s of schedules) {
     const queue = `cron.${s.name}`;
     await ensureQueue(queue, { policy: "singleton", retryLimit: 1, expireInSeconds: 3600 });
@@ -67,10 +75,13 @@ export async function registerSchedules(boss: PgBoss) {
     // Schedules fire at minute boundaries; a 15 s pickup keeps them on time with a third of the polling.
     await boss.work(queue, { pollingIntervalSeconds: 15 }, async () => recordRun(s.name, s.run));
   }
-  // Retired or disabled timers must leave no queued work behind, including queues an earlier release
-  // already unscheduled. pg-boss deletes the queue's jobs and schedules; job_runs retains its audit.
+  // A capacity pause removes only the schedule definition. Its queue and already queued occurrence stay
+  // intact for a controlled resume. Truly retired timers still leave no queued work behind.
   const current = new Set(schedules.map((s) => `cron.${s.name}`));
+  const known = new Set(allSchedules.map((s) => `cron.${s.name}`));
   for (const old of await boss.getQueues()) {
-    if (old.name.startsWith("cron.") && !current.has(old.name)) await boss.deleteQueue(old.name);
+    if (!old.name.startsWith("cron.") || current.has(old.name)) continue;
+    if (capacityPaused && known.has(old.name)) await boss.unschedule(old.name);
+    else await boss.deleteQueue(old.name);
   }
 }

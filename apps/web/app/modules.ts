@@ -153,11 +153,6 @@ export interface WebModule {
   darkMarks?: string[];
   /** The starred page (routes/starred.tsx): buttons ahead of 导入文件 that bring stars in from elsewhere, each resolving to the line it reports. */
   starredImports?: Array<{ label: string; run: () => Promise<{ ok: boolean; text: string }> }>;
-  /**
-   * The feedback page (routes/feedback.tsx): a draft kept elsewhere in this browser, read when the page
-   * keeps none of its own ({ content, email, pageUrl }), and cleared once its own is saved or sent.
-   */
-  feedbackDraft?: { read: () => unknown; clear: () => void };
   /** The terms page's footer: links after the engine's (routes/terms.tsx). */
   termsLinks?: Array<{ to: string; label: string }>;
   /** Its ways into the agent page (AgentPart.tracks) by their short names: the 我的 page's row names the first three (routes/more.tsx). */

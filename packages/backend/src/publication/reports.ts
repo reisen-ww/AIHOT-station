@@ -9,6 +9,7 @@ import { isoWeekRange, monthRange } from "@aihot/contracts/time";
 import { dailyUrl, itemUrl, periodUrl, siteUrl } from "./links.ts";
 import { publicSourceName } from "./rules.ts";
 import { listedCondition } from "./scope.ts";
+import { livePublicationRead, type PublicationRead } from "./read.ts";
 
 export type { ReportKind };
 
@@ -32,11 +33,12 @@ interface Availability {
   publishedAt: Date | null;
 }
 
-async function availability(ids: string[]): Promise<Map<string, Availability>> {
+async function availability(ids: string[], read: PublicationRead = livePublicationRead()): Promise<Map<string, Availability>> {
+  const sql = read.db;
   const out = new Map<string, Availability>();
   if (ids.length === 0) return out;
   const rows = await sql<{ id: string; available: boolean; summary: string | null; first_party: boolean; source_id: string; source_name: string | null; icon_url: string | null; at: Date | null }[]>`
-    SELECT p.article_id AS id, (${listedCondition(new Date())}) AS available, p.summary, (s.tier = 'T1') AS first_party, p.source_id, s.name AS source_name, s.icon_url,
+    SELECT p.article_id AS id, (${listedCondition(read.now)}) AS available, p.summary, (s.tier = 'T1') AS first_party, p.source_id, s.name AS source_name, s.icon_url,
       coalesce(p.published_at, p.discovered_at) AS at
     FROM publications p LEFT JOIN sources s ON s.id = p.source_id
     WHERE p.article_id IN ${sql(ids)}`;
@@ -55,12 +57,13 @@ async function availability(ids: string[]): Promise<Map<string, Availability>> {
 }
 
 /** Ids among `ids` that are no longer public. Ids absent from this database stay cited as published. */
-export async function unavailableIds(ids: string[]): Promise<Set<string>> {
+export async function unavailableIds(ids: string[], read: PublicationRead = livePublicationRead()): Promise<Set<string>> {
+  const sql = read.db;
   const unique = [...new Set(ids.filter(Boolean))];
   if (!unique.length) return new Set();
   const rows = await sql<{ id: string }[]>`
     SELECT p.article_id AS id FROM publications p
-    WHERE p.article_id = ANY(${unique}::text[]) AND NOT (${listedCondition(new Date())})`;
+     WHERE p.article_id = ANY(${unique}::text[]) AND NOT (${listedCondition(read.now)})`;
   return new Set(rows.map((r) => r.id));
 }
 
@@ -69,7 +72,8 @@ export async function unavailableIds(ids: string[]): Promise<Set<string>> {
  * numbers count the whole series of the kind before the limit applies, so the 401st issue is numbered
  * 401 although the index keeps 400; a back-filled or deleted issue renumbers the ones after it.
  */
-export async function reportIndexRows(kind: ReportKind, limit: number) {
+export async function reportIndexRows(kind: ReportKind, limit: number, read: PublicationRead = livePublicationRead()) {
+  const sql = read.db;
   return sql<{ key: string; issue_number: number; content: Record<string, any>; generated_at: Date }[]>`
     SELECT key, generated_at, (row_number() OVER (ORDER BY key))::int AS issue_number, jsonb_build_object(
       'lead', content->'lead', 'headline', content->'headline', 'title', content->'title',
@@ -143,7 +147,8 @@ export function issueLead(content: Record<string, any>, kind: "daily" | "periodi
  * Projected indexes and feeds keep no citation prose. Fetch just a replacement lead's frozen
  * paragraph after choosing it, in one batch; the 400-issue navigation stays free of full summaries.
  */
-async function dailyLeads(rows: Array<{ key: string; content: Record<string, any> }>, gone: Set<string>): Promise<Map<string, IssueLead | null>> {
+async function dailyLeads(rows: Array<{ key: string; content: Record<string, any> }>, gone: Set<string>, read: PublicationRead = livePublicationRead()): Promise<Map<string, IssueLead | null>> {
+  const sql = read.db;
   const leads = new Map(rows.map((r) => [r.key, issueLead(r.content, "daily", gone)]));
   const replacements = rows.flatMap((r) => {
     const lead = leads.get(r.key);
@@ -180,7 +185,7 @@ function periodicHeadline(content: Record<string, any>): string | null {
 }
 
 /** Check only the first possible lead of each report; advance reports whose candidate was withdrawn. */
-export async function unavailableHeadlineIds(rows: Array<{ content: Record<string, any> }>, kind: "daily" | "periodic"): Promise<Set<string>> {
+export async function unavailableHeadlineIds(rows: Array<{ content: Record<string, any> }>, kind: "daily" | "periodic", read: PublicationRead = livePublicationRead()): Promise<Set<string>> {
   const reports = rows.map((r) => leadCandidates(r.content, kind)).filter((items) => items.length > 0);
   const gone = new Set<string>();
   const checked = new Set<string>();
@@ -188,7 +193,7 @@ export async function unavailableHeadlineIds(rows: Array<{ content: Record<strin
     const candidates = reports.map((items) => items.find((i) => !i.itemId || !gone.has(i.itemId))?.itemId)
       .filter((id): id is string => !!id && !checked.has(id));
     if (!candidates.length) return gone;
-    for (const id of await unavailableIds(candidates)) gone.add(id);
+    for (const id of await unavailableIds(candidates, read)) gone.add(id);
     for (const id of candidates) checked.add(id);
   }
 }
@@ -292,7 +297,8 @@ export function leadItemOf(leadTitle: string | undefined, highlights: ReportCita
  * A picture for the front page's lead item: its own first sizeable image, else one from another public
  * report of the same event (first-hand first). Items shown as summaries only lend no pictures.
  */
-async function leadCover(itemId: string): Promise<{ url: string; srcSet?: string; width: number | null; height: number | null } | null> {
+async function leadCover(itemId: string, read: PublicationRead = livePublicationRead()): Promise<{ url: string; srcSet?: string; width: number | null; height: number | null } | null> {
+  const sql = read.db;
   const [row] = await sql<{ m: { url: string; width?: number; height?: number } }[]>`
     SELECT img.m
     FROM publications p JOIN articles a ON a.id = p.article_id
@@ -301,7 +307,7 @@ async function leadCover(itemId: string): Promise<{ url: string; srcSet?: string
       WHERE m->>'kind' = 'image' AND coalesce((m->>'width')::numeric, 800) >= 480 LIMIT 1
     ) img
     WHERE (p.article_id = ${itemId} OR p.story_id = (SELECT story_id FROM publications WHERE article_id = ${itemId}))
-      AND ${listedCondition(new Date())} AND p.body_mode <> 'summary'
+       AND ${listedCondition(read.now)} AND p.body_mode <> 'summary'
     ORDER BY (p.article_id = ${itemId}) DESC, p.first_party DESC, coalesce(p.score, 0) DESC, p.article_id
     LIMIT 1`;
   if (!row) return null;
@@ -315,14 +321,16 @@ function readingMinutes(text: string): number {
   return Math.max(1, Math.round([...text].length / 450));
 }
 
-async function neighbors(kind: ReportKind, key: string): Promise<{ prev: string | null; next: string | null }> {
+async function neighbors(kind: ReportKind, key: string, read: PublicationRead = livePublicationRead()): Promise<{ prev: string | null; next: string | null }> {
+  const sql = read.db;
   const [row] = await sql<{ prev: string | null; next: string | null }[]>`
     SELECT (SELECT key FROM reports WHERE kind = ${kind} AND key < ${key} ORDER BY key DESC LIMIT 1) AS prev,
       (SELECT key FROM reports WHERE kind = ${kind} AND key > ${key} ORDER BY key ASC LIMIT 1) AS next`;
   return { prev: row?.prev ?? null, next: row?.next ?? null };
 }
 
-export async function loadReport(kind: ReportKind, key: string): Promise<ReportDetail | null> {
+export async function loadReport(kind: ReportKind, key: string, read: PublicationRead = livePublicationRead()): Promise<ReportDetail | null> {
+  const sql = read.db;
   // Its number counts every issue of the kind up to it, as the index numbers them (reportIndexRows).
   const [r] = await sql<(Pick<ReportRow, "content" | "generated_at"> & { issue_number: number })[]>`
     SELECT r.content, r.generated_at, (SELECT count(*)::int FROM reports earlier WHERE earlier.kind = r.kind AND earlier.key <= r.key) AS issue_number
@@ -335,7 +343,7 @@ export async function loadReport(kind: ReportKind, key: string): Promise<ReportD
     ...(c.themes ?? []).flatMap((t: any) => t.storyRefs ?? []),
   ];
   const rawItems = [...entries, ...entries.flatMap((e) => e.related ?? [])];
-  const avail = await availability([...new Set(rawItems.map((i) => i.itemId).filter(Boolean))]);
+  const avail = await availability([...new Set(rawItems.map((i) => i.itemId).filter(Boolean))], read);
   const cite = (raw: Record<string, any>) => entryCitation(raw, avail);
 
   const sections: ReportDetail["sections"] = kind === "daily"
@@ -357,7 +365,7 @@ export async function loadReport(kind: ReportKind, key: string): Promise<ReportD
   const leadItem = hasCitedLead
     ? all.find((x) => x.itemId === named?.itemId)
     : kind === "daily" ? leadItemOf(c.lead?.title, highlights, all) : (highlights.find((x) => x.available) ?? all.find((x) => x.available));
-  const [{ prev, next }, picture] = await Promise.all([neighbors(kind, key), leadItem?.itemId && leadItem.available ? leadCover(leadItem.itemId) : null]);
+  const [{ prev, next }, picture] = await Promise.all([neighbors(kind, key, read), leadItem?.itemId && leadItem.available ? leadCover(leadItem.itemId, read) : null]);
   const cover = picture && leadItem ? { ...picture, caption: kind === "daily" || c.leadItemId ? null : leadItem.title } : null;
   const headline = kind === "daily" ? null : periodicHeadline(c);
   const title = kind === "daily" ? `${withSubject("日报")} · ${key}`
@@ -408,8 +416,11 @@ export function reportIndex(kind: ReportKind) {
   return entry.get();
 }
 
-export async function listReports(kind: ReportKind, limit = INDEX_LIMIT): Promise<ReportIndexEntry[]> {
-  const index = await reportIndex(kind);
+export async function listReports(kind: ReportKind, limit = INDEX_LIMIT, read?: PublicationRead): Promise<ReportIndexEntry[]> {
+  const index = read ? await (async () => {
+    const rows = await reportIndexRows(kind, limit, read);
+    return { rows, gone: await unavailableHeadlineIds(rows, kind === "daily" ? "daily" : "periodic", read) };
+  })() : await reportIndex(kind);
   const rows = index.rows.slice(0, limit);
   const shape = kind === "daily" ? "daily" : "periodic";
   const gone = index.gone;
@@ -524,7 +535,8 @@ export interface FeedIssue {
  * The newest issues of a kind for its RSS feed: headline, lead paragraph (a weekly's or monthly's
  * overview) and each section's entry titles with their links on this site, withdrawn ones left out.
  */
-export async function feedIssues(kind: ReportKind, limit: number): Promise<FeedIssue[]> {
+export async function feedIssues(kind: ReportKind, limit: number, read: PublicationRead = livePublicationRead()): Promise<FeedIssue[]> {
+  const sql = read.db;
   const rows = kind === "daily"
     ? await sql<{ key: string; generated_at: Date; content: Record<string, any> }[]>`
       SELECT key, generated_at, jsonb_build_object(
@@ -544,8 +556,8 @@ export async function feedIssues(kind: ReportKind, limit: number): Promise<FeedI
           FROM jsonb_array_elements(coalesce(content->'themes', '[]'::jsonb)) WITH ORDINALITY AS x(t, tord))) AS content
       FROM reports WHERE kind = ${kind} ORDER BY key DESC LIMIT ${limit}`;
   const shape = kind === "daily" ? "daily" : "periodic";
-  const gone = await unavailableIds(rows.flatMap((r) => entriesOf(r.content, shape).map((i) => i.itemId)));
-  const leads = kind === "daily" ? await dailyLeads(rows, gone) : null;
+  const gone = await unavailableIds(rows.flatMap((r) => entriesOf(r.content, shape).map((i) => i.itemId)), read);
+  const leads = kind === "daily" ? await dailyLeads(rows, gone, read) : null;
   return rows.map((r) => {
     const lead = leads ? leads.get(r.key) : issueLead(r.content, shape, gone);
     const groups: Array<{ label: unknown; items?: Array<Record<string, any>> }> = kind === "daily"

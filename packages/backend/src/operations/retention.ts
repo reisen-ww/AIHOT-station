@@ -36,6 +36,31 @@ export async function dailyRetention(now = new Date()) {
   const leases = await sql`DELETE FROM delivery_leases WHERE expires_at < ${now}`;
   // Scheduled-task history: 30 days (failures 90) is enough for the runs view.
   const runs = await sql`DELETE FROM job_runs WHERE started_at < ${new Date(now.getTime() - 30 * 86400_000)} AND (status IS DISTINCT FROM 'failed' OR started_at < ${new Date(now.getTime() - 90 * 86400_000)})`;
+  // Bound diagnostic history in small batches. A first cleanup on the phone must not create one large
+  // transaction and WAL spike. Running or failed fetches receive the longer ninety-day window.
+  let deletedFetchRuns = 0;
+  let deletedStoryHeatHours = 0;
+  const fetchCutoff = new Date(now.getTime() - 30 * 86400_000);
+  const failedFetchCutoff = new Date(now.getTime() - 90 * 86400_000);
+  const heatCutoff = new Date(now.getTime() - 30 * 86400_000);
+  for (let batch = 0; batch < 20; batch++) {
+    const removed = await sql`WITH doomed AS (
+      SELECT ctid FROM fetch_runs
+      WHERE (finished_at IS NOT NULL AND status IN ('ok', 'skipped') AND started_at < ${fetchCutoff})
+         OR (status IN ('failed', 'running') AND started_at < ${failedFetchCutoff})
+      ORDER BY started_at LIMIT 5000
+    ) DELETE FROM fetch_runs f USING doomed d WHERE f.ctid = d.ctid`;
+    deletedFetchRuns += removed.count;
+    if (removed.count < 5000) break;
+  }
+  // Public curves read at most seven days; thirty days leaves diagnostic margin.
+  for (let batch = 0; batch < 20; batch++) {
+    const removed = await sql`WITH doomed AS (
+      SELECT ctid FROM story_heat_hourly WHERE hour < ${heatCutoff} ORDER BY hour LIMIT 10000
+    ) DELETE FROM story_heat_hourly h USING doomed d WHERE h.ctid = d.ctid`;
+    deletedStoryHeatHours += removed.count;
+    if (removed.count < 10000) break;
+  }
   const monthMs = 30 * 86400_000;
   // Feedback screenshots that only wait to be forwarded (the database then keeps just the Feishu image
   // key). The forwarding sweep gives up after a week; anything older is removed, whether or not
@@ -47,6 +72,8 @@ export async function dailyRetention(now = new Date()) {
     ...modules,
     deletedLeases: leases.count,
     deletedJobRuns: runs.count,
+    deletedFetchRuns,
+    deletedStoryHeatHours,
     deletedScreenshots,
     prunedCache,
   };

@@ -1,6 +1,6 @@
 // Worker process: queues and schedules for collection, processing, events, reports and ops, and the site's
 // modules (site/modules/server.ts).
-import { assertProductionSecrets } from "@aihot/backend/config";
+import { assertProductionSecrets, capacityPaused } from "@aihot/backend/config";
 import { closeDb } from "@aihot/backend/db";
 import { getBoss, stopBoss, workModuleQueues } from "@aihot/backend/jobs/queue";
 import { installModules } from "@aihot/backend/modules";
@@ -19,15 +19,17 @@ assertProductionSecrets([["auth", "IMG_PROXY_SIGN_SECRET"]]);
 
 await ensureContentTargets();
 const boss = await getBoss();
-await registerContentJobs(boss);
-if (process.env.COLLECT_ENABLED === "true") await registerSourceJobs(boss);
-await registerEventJobs(boss);
-await registerNotifyJobs(boss);
-await registerPublicationJobs(boss);
-await workModuleQueues(boss);
+if (!capacityPaused) await registerContentJobs(boss);
+if (!capacityPaused && process.env.COLLECT_ENABLED === "true") await registerSourceJobs(boss);
+if (!capacityPaused) await registerEventJobs(boss);
+if (!capacityPaused) {
+  await registerNotifyJobs(boss);
+  await registerPublicationJobs(boss);
+  await workModuleQueues(boss);
+}
 await registerSchedules(boss);
 const heartbeat = startHeartbeat("worker");
-console.log(JSON.stringify({ level: "info", msg: "worker started", pid: process.pid }));
+console.log(JSON.stringify({ level: "info", msg: "worker started", pid: process.pid, capacityPaused }));
 
 let stopping = false;
 const shutdown = async () => {

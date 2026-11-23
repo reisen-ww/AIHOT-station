@@ -9,6 +9,7 @@ dist/
 
 # Web production build
 apps/web/build/
+apps/web/build-static/
 apps/web/.react-router/
 
 # Font package unpacked to regenerate the report nameplates (docs/customize.md)

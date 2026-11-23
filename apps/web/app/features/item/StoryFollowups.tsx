@@ -3,6 +3,7 @@ import { Link } from "react-router";
 import type { StoryFollowup, StoryFollowupsResponse, StoryRef } from "@aihot/contracts/site";
 import { MoreLink } from "../../components/ui/Page";
 import { relativeTime } from "../../lib/format";
+import { siteFetch } from "../../lib/site-fetch";
 
 /**
  * "事件后续": the other developments of the event this report belongs to, newest first, with a link to
@@ -19,7 +20,7 @@ export function StoryFollowups({ story, currentId }: { story: StoryRef; currentI
     const load = () => {
       if (started) return;
       started = true;
-      fetch(`/api/site/stories/${encodeURIComponent(story.publicId)}/followups`, { signal: controller.signal })
+      siteFetch(`/api/site/stories/${encodeURIComponent(story.publicId)}/followups`, { signal: controller.signal })
         .then((r) => (r.ok ? r.json() : null))
         .then((body: StoryFollowupsResponse | null) => {
           if (!body || controller.signal.aborted) return;

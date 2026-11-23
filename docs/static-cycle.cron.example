@@ -1,0 +1,4 @@
+# Template only. Do not install before the actual phone paths, identity and publishing are authorized.
+# Each hour retries failures; successful checks are limited to two-hour time slots.
+# The launcher must supply the four named database variables and use the same workDirectory.
+# 0 * * * * /ABSOLUTE/PATH/TO/APPROVED-LAUNCHER --scheduled --publish >> /ABSOLUTE/PATH/TO/static-cycle.log 2>&1

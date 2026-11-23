@@ -17,6 +17,7 @@ import { cached, type Cached } from "../lib/cache.ts";
 import { serverModules } from "../modules.ts";
 import { ITEM_COLUMNS, ITEM_FROM, toFeedItemSummary, type ItemRow } from "./items.ts";
 import { evidenceCondition, listedCondition, ownFactEvidenceCondition, seatedCondition, selectedCondition, storyReportCondition } from "./scope.ts";
+import { itemWindow, livePublicationRead, type PublicationRead } from "./read.ts";
 
 export interface Topic {
   slug: string;
@@ -164,7 +165,8 @@ interface TopicIndex {
 }
 
 /** The full index or a bounded set of its candidates, with their current content and membership. */
-async function readSeats(now: Date, ids?: string[], topics: Topic[] = TOPICS): Promise<TopicMember[]> {
+async function readSeats(now: Date, ids?: string[], topics: Topic[] = TOPICS, read: PublicationRead = livePublicationRead()): Promise<TopicMember[]> {
+  const sql = read.db;
   const rows = await sql<SeatRow[]>`
     WITH seats AS (
       SELECT p.article_id AS id, p.timeline_at AS at, p.visible_after AS released, p.title, p.score, (s.tier = 'T1') AS first_party,
@@ -176,11 +178,13 @@ async function readSeats(now: Date, ids?: string[], topics: Topic[] = TOPICS): P
       LEFT JOIN analyses a ON a.id = p.analysis_id
       LEFT JOIN stories st ON st.id = p.story_id AND st.merged_into IS NULL
       WHERE ${seatedCondition(now)}
+        ${itemWindow(read)}
         ${ids ? sql`AND p.article_id = ANY(${[...new Set(ids)]}::text[])` : sql``}
     ), dates AS (
       SELECT p.fact_id, min(coalesce(p.published_at, p.timeline_at)) AS fact_published_at
       FROM publications p WHERE p.fact_id IN (SELECT fact_id FROM seats WHERE fact_id IS NOT NULL)
         AND ${selectedCondition(now)} AND ${ownFactEvidenceCondition()}
+        ${itemWindow(read)}
       GROUP BY p.fact_id
     )
     SELECT seats.*, dates.fact_published_at FROM seats LEFT JOIN dates ON dates.fact_id = seats.fact_id
@@ -193,8 +197,8 @@ async function readSeats(now: Date, ids?: string[], topics: Topic[] = TOPICS): P
   }));
 }
 
-async function readIndex(now: Date): Promise<TopicIndex> {
-  const members = (await readSeats(now)).filter((seat) => seat.topics.length > 0);
+async function readIndex(now: Date, read: PublicationRead = livePublicationRead()): Promise<TopicIndex> {
+  const members = (await readSeats(now, undefined, TOPICS, read)).filter((seat) => seat.topics.length > 0);
   const bySlug = new Map(TOPICS.map((t) => [t.slug, [] as TopicMember[]]));
   for (const seat of members) for (const slug of seat.topics) bySlug.get(slug)?.push(seat);
   const parts = serverModules().flatMap((m) => (m.topics?.page?.index ? [{ name: m.name, index: m.topics.page.index }] : []));
@@ -204,7 +208,7 @@ async function readIndex(now: Date): Promise<TopicIndex> {
 const indexCache = cached(() => readIndex(new Date()), { freshMs: 60_000, maxStaleMs: 60_000 });
 
 /** A given `now` reads afresh (tests, a clock other than this minute's). */
-const topicIndex = (now?: Date) => (now ? readIndex(now) : indexCache.get());
+const topicIndex = (now?: Date, read?: PublicationRead) => (read ? readIndex(read.now, read) : now ? readIndex(now) : indexCache.get());
 
 const DAY = 86400_000;
 const RECENT_DAYS = 30;
@@ -237,9 +241,9 @@ const LATEST_CANDIDATES = 3;
  * Recheck only the reports a page may name: withdrawals and corrections, including the title and
  * membership, take effect even while counts are cached.
  */
-async function currentSeats(ids: string[], now: Date, topics: Topic[] = TOPICS): Promise<Map<string, TopicMember>> {
+async function currentSeats(ids: string[], now: Date, topics: Topic[] = TOPICS, read: PublicationRead = livePublicationRead()): Promise<Map<string, TopicMember>> {
   if (ids.length === 0) return new Map();
-  return new Map((await readSeats(now, ids, topics)).map((s) => [s.id, s]));
+  return new Map((await readSeats(now, ids, topics, read)).map((s) => [s.id, s]));
 }
 
 function summarize(t: Topic, seats: TopicMember[], now: Date, brands: Map<string, Brand>, live: Map<string, TopicMember>): TopicSummary {
@@ -258,9 +262,9 @@ function summarize(t: Topic, seats: TopicMember[], now: Date, brands: Map<string
   };
 }
 
-export async function listTopicSummaries(): Promise<TopicsResponse> {
-  const [index, brands] = await Promise.all([topicIndex(), companyBrands()]);
-  const live = await currentSeats(TOPICS.flatMap((t) => index.bySlug.get(t.slug)!.slice(0, LATEST_CANDIDATES).map((s) => s.id)), new Date());
+export async function listTopicSummaries(read?: PublicationRead): Promise<TopicsResponse> {
+  const [index, brands] = await Promise.all([topicIndex(undefined, read), companyBrands()]);
+  const live = await currentSeats(TOPICS.flatMap((t) => index.bySlug.get(t.slug)!.slice(0, LATEST_CANDIDATES).map((s) => s.id)), read?.now ?? new Date(), TOPICS, read);
   return { groups: TOPIC_GROUPS, topics: TOPICS.map((t) => summarize(t, index.bySlug.get(t.slug)!, index.at, brands, live)) };
 }
 
@@ -289,23 +293,25 @@ export async function topicPageCounts(now?: Date): Promise<TopicCount[]> {
 const poolCounts = new Map<string, Cached<number>>();
 
 /** Every listed report of the topic, selected or not (收录). */
-function poolTotal(t: Topic, now?: Date): Promise<number> {
-  const read = async (at: Date) => (await sql<{ n: number }[]>`SELECT count(*)::int AS n FROM publications p WHERE ${listedCondition(at)} AND ${inTopic(t)}`)[0]?.n ?? 0;
-  if (now) return read(now);
+function poolTotal(t: Topic, now?: Date, context?: PublicationRead): Promise<number> {
+  const sql = context?.db ?? livePublicationRead().db;
+  const read = async (at: Date) => (await sql<{ n: number }[]>`SELECT count(*)::int AS n FROM publications p WHERE ${listedCondition(at)} AND ${inTopic(t)} ${itemWindow(context)}`)[0]?.n ?? 0;
+  if (context || now) return read(context?.now ?? now!);
   let count = poolCounts.get(t.slug);
   if (!count) poolCounts.set(t.slug, (count = cached(() => read(new Date()), { freshMs: 60_000, maxStaleMs: 60_000 })));
   return count.get();
 }
 
-export async function loadTopicPage(slug: string, page: number, now?: Date): Promise<TopicPage | null> {
+export async function loadTopicPage(slug: string, page: number, now?: Date, read?: PublicationRead): Promise<TopicPage | null> {
+  const sql = read?.db ?? livePublicationRead().db;
   const topic = findTopic(slug);
   if (!topic || !Number.isInteger(page) || page < 1) return null;
-  const index = await topicIndex(now);
+  const index = await topicIndex(now, read);
   const seats = index.bySlug.get(slug)!;
   const pageCount = Math.max(1, Math.ceil(seats.length / TOPIC_PAGE_SIZE));
   if (page > pageCount) return null;
   const ids = seats.slice((page - 1) * TOPIC_PAGE_SIZE, page * TOPIC_PAGE_SIZE).map((s) => s.id);
-  const at = now ?? new Date();
+  const at = read?.now ?? now ?? new Date();
   // Reports read again before the page names them: the newest few, for the topic's latest one, and the
   // ones the modules' parts may name.
   const recheck = seats.slice(0, LATEST_CANDIDATES).map((s) => s.id);
@@ -319,9 +325,9 @@ export async function loadTopicPage(slug: string, page: number, now?: Date): Pro
       ? sql<ItemRow[]>`SELECT ${ITEM_COLUMNS} ${ITEM_FROM} WHERE p.article_id = ANY(${ids}::text[]) AND ${seatedCondition(at)} AND ${inTopic(topic)}
           ORDER BY coalesce(p.published_at, p.discovered_at) DESC, p.article_id DESC`
       : [],
-    poolTotal(topic, now),
+    poolTotal(topic, now, read),
     companyBrands(),
-    currentSeats(recheck, at, [topic]),
+    currentSeats(recheck, at, [topic], read),
   ]);
   const groupName = TOPIC_GROUPS.find((g) => g.key === topic.group)?.name ?? "";
   return {
@@ -337,12 +343,14 @@ export async function loadTopicPage(slug: string, page: number, now?: Date): Pro
 const STORY_TOPICS = 6;
 
 /** The topics of a story's reports, most reports first. */
-export async function topicsOfStory(storyId: number, now = new Date()): Promise<TopicLink[]> {
+export async function topicsOfStory(storyId: number, now = new Date(), read: PublicationRead = livePublicationRead()): Promise<TopicLink[]> {
+  const sql = read.db;
   const rows = await sql<{ topics: string[] }[]>`
     SELECT DISTINCT ON (p.article_id) ${topicMembership()} AS topics
     FROM facts f JOIN fact_articles fa ON fa.fact_id = f.id JOIN publications p ON p.article_id = fa.article_id
     JOIN sources s ON s.id = p.source_id
     WHERE f.story_id = ${storyId} AND ${evidenceCondition()} AND ${storyReportCondition(now)}
+      ${itemWindow(read)}
     ORDER BY p.article_id`;
   const reports = new Map<string, number>();
   for (const r of rows) for (const slug of r.topics) reports.set(slug, (reports.get(slug) ?? 0) + 1);

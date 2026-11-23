@@ -7,6 +7,7 @@ import { sql } from "../db.ts";
 import { categoryCondition, channelCondition, tagCondition } from "./items.ts";
 import { evidenceCondition, listedCondition } from "./scope.ts";
 import { publicSourceName } from "./rules.ts";
+import { itemWindow, livePublicationRead, type PublicationRead } from "./read.ts";
 
 export interface GroupReportsQuery {
   factPublicId: string;
@@ -35,12 +36,14 @@ function storyScope(factId: number) {
  * link back to it; null when the fact is unknown or has no public report. The detail page reads its
  * numbers from here, so they stay the ones the timeline card shows.
  */
-export async function countGroupReports(factId: number, filters: GroupFilters, now = new Date()) {
+export async function countGroupReports(factId: number, filters: GroupFilters, now = new Date(), read?: PublicationRead) {
+  const sql = read?.db ?? livePublicationRead().db;
   const [c] = await sql<{ public_id: string | null; reports: number; sources: number }[]>`
     SELECT (SELECT public_id FROM facts WHERE id = ${factId}) AS public_id,
       count(DISTINCT p.article_id) AS reports, count(DISTINCT p.source_id) AS sources
     FROM facts f JOIN fact_articles fa ON fa.fact_id = f.id JOIN publications p ON p.article_id = fa.article_id
     WHERE ${storyScope(factId)} AND ${evidenceCondition()} AND ${listedCondition(now)}
+      ${itemWindow(read)}
       ${channelCondition(filters.channel)} ${categoryCondition(filters.category)} ${tagCondition(filters.tag)}`;
   if (!c || !c.public_id || Number(c.reports) === 0) return null;
   return {
@@ -51,7 +54,8 @@ export async function countGroupReports(factId: number, filters: GroupFilters, n
 }
 
 /** The fact's public reports under the filters, newest first; null when it has none. */
-export async function loadGroupReports(q: GroupReportsQuery, now = new Date()): Promise<GroupReportsResponse | null> {
+export async function loadGroupReports(q: GroupReportsQuery, now = new Date(), read?: PublicationRead, limit: number | null = MAX_REPORTS): Promise<GroupReportsResponse | null> {
+  const sql = read?.db ?? livePublicationRead().db;
   const [fact] = await sql<{ id: number }[]>`SELECT id FROM facts WHERE public_id = ${q.factPublicId}`;
   if (!fact) return null;
   const members = await sql<{ id: string; title: string; timeline_at: Date; url: string; source_name: string }[]>`
@@ -59,9 +63,10 @@ export async function loadGroupReports(q: GroupReportsQuery, now = new Date()): 
     FROM facts f JOIN fact_articles fa ON fa.fact_id = f.id JOIN publications p ON p.article_id = fa.article_id
     JOIN sources s ON s.id = p.source_id
     WHERE ${storyScope(fact.id)} AND ${evidenceCondition()} AND ${listedCondition(now)}
+      ${itemWindow(read)}
       ${channelCondition(q.channel)} ${categoryCondition(q.category)} ${tagCondition(q.tag)}
     ORDER BY p.timeline_at DESC, p.article_id ASC
-    LIMIT ${MAX_REPORTS}`;
+    LIMIT ${limit}`;
   if (members.length === 0) return null;
   return {
     factId: q.factPublicId,

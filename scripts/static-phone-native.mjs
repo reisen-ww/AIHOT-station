@@ -1,0 +1,80 @@
+// Phone-only adapter: native Android Node handles data/files; Debian keeps its existing compiler.
+import { mkdir, rename, readFile, lstat } from 'node:fs/promises';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { parseArgs } from 'node:util';
+import { runStaticCycle, runLoggedCommand, validateCycleConfiguration } from './static-cycle.mjs';
+import { PUBLIC_SITE_URL } from './static-runner-core.mjs';
+
+export function nativeConfiguration(input, rootfs) {
+  const translate = (value) => {
+    if (typeof value !== 'string' || !value.startsWith('/root/') || value.split('/').includes('..')) throw new Error('explicit guest /root path required');
+    return path.join(rootfs, value);
+  };
+  return validateCycleConfiguration({ ...input, workDirectory: translate(input.workDirectory), stations: Object.fromEntries(Object.entries(input.stations).map(([slug, station]) => [slug, { ...station, root: translate(station.root), ...(station.assetsDirectory ? { assetsDirectory: translate(station.assetsDirectory) } : {}) }])) });
+}
+
+export function guestPath(file, rootfs) {
+  const relative = path.relative(rootfs, file);
+  if (!relative || relative === '..' || relative.startsWith('..' + path.sep) || path.isAbsolute(relative)) throw new Error('path outside phone rootfs');
+  return '/' + relative.split(path.sep).join('/');
+}
+const quote = (value) => "'" + String(value).replaceAll("'", "'\\''") + "'";
+async function physicalDirectory(root) {
+  const resolved = path.resolve(root), anchor = path.parse(resolved).root;
+  let current = anchor;
+  for (const part of resolved.slice(anchor.length).split(path.sep).filter(Boolean)) {
+    current = path.join(current, part);
+    try { await mkdir(current); } catch (error) { if (error.code !== 'EEXIST') throw error; }
+    const info = await lstat(current);
+    if (info.isSymbolicLink() || !info.isDirectory()) throw new Error('physical directory required: ' + current);
+  }
+}
+
+export function nativeAdapters(configuration, rootfs, prefix) {
+  const safe = { ...process.env, AIHOT_STATIC_BUILD: '0', AIHOT_CREDENTIALS_DIR: path.join(configuration.workDirectory, 'no-credentials'), MODEL_CALLS_ENABLED: 'false', COLLECT_ENABLED: 'false', FEISHU_INTERNAL_ENABLED: 'false', FEISHU_CONTENT_PUSH_ENABLED: 'false', INDEXNOW_SUBMIT_ENABLED: 'false', ALLOW_PRIVATE_NETWORK_FETCH: 'false' };
+  return {
+    async exportStation(slug, snapshot, logFile) {
+      const station = configuration.stations[slug], database = process.env[station.databaseEnv];
+      if (!database || !/^postgres(?:ql)?:$/.test(new URL(database).protocol)) throw new Error('missing explicit database');
+      const args = ['--max-old-space-size=192', 'scripts/export-static.ts', '--station', slug, '--out', guestPath(snapshot, rootfs), '--database-url', database, '--site-url', PUBLIC_SITE_URL + '/' + slug, '--max-items', String(station.maxItems), '--cache-dir', guestPath(path.join(configuration.workDirectory, 'cache', slug), rootfs)];
+      if (station.retainScoreAtLeast !== undefined) args.push('--retain-score-at-least', String(station.retainScoreAtLeast));
+      if (station.assetsDirectory) args.push('--assets-dir', guestPath(station.assetsDirectory, rootfs));
+      const command = 'set -eu; unset LD_LIBRARY_PATH LD_PRELOAD; export PATH=/usr/local/bin:/usr/bin:/bin; cd ' + quote(guestPath(station.root, rootfs)) + '; exec /usr/local/bin/node ' + args.map(quote).join(' ');
+      await runLoggedCommand(path.join(prefix, 'bin/proot-distro'), ['login', 'debian-native', '--', '/bin/bash', '--noprofile', '--norc', '-c', command], { cwd: station.root, env: { ...safe, LD_LIBRARY_PATH: '', LD_PRELOAD: '' }, logFile, secrets: [database] });
+    },
+    async buildStation(slug, snapshot, destination, logFile) {
+    const station = configuration.stations[slug], web = path.join(station.root, 'apps/web'), client = path.join(web, 'build-static/client');
+    await physicalDirectory(path.dirname(client));
+    try {
+      const info = await lstat(client);
+      if (info.isSymbolicLink() || !info.isDirectory()) throw new Error('invalid previous client directory');
+      const preserved = path.join(configuration.workDirectory, 'preserved-builds');
+      await physicalDirectory(client);
+      await physicalDirectory(preserved);
+      await rename(client, path.join(preserved, path.basename(path.dirname(path.dirname(destination))) + '-' + slug));
+    } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    const env = { ...safe, AIHOT_STATIC_BUILD: '1', AIHOT_STATIC_STATION: slug, AIHOT_STATIC_DATA: snapshot, AIHOT_STATIC_URL: PUBLIC_SITE_URL + '/' + slug, AIHOT_STATIC_RENDER_COMMAND: path.join(process.env.HOME, 'static-render-guest-v1.py') };
+    const compiler = async (restore) => {
+      const values = { PATH: '/usr/local/bin:/usr/bin:/bin', AIHOT_STATIC_BUILD: restore ? '0' : '1', AIHOT_STATIC_COMPILE_ONLY: restore ? '0' : '1', AIHOT_STATIC_STATION: slug, AIHOT_STATIC_DATA: guestPath(snapshot, rootfs), AIHOT_STATIC_URL: env.AIHOT_STATIC_URL, MODEL_CALLS_ENABLED: 'false', COLLECT_ENABLED: 'false', FEISHU_INTERNAL_ENABLED: 'false', FEISHU_CONTENT_PUSH_ENABLED: 'false', INDEXNOW_SUBMIT_ENABLED: 'false', AIHOT_CREDENTIALS_DIR: guestPath(safe.AIHOT_CREDENTIALS_DIR, rootfs) };
+      const cli = guestPath(path.join(station.root, 'node_modules/@react-router/dev/bin.cjs'), rootfs);
+      const args = restore ? [cli, 'typegen', '.', '--config', guestPath(path.join(station.root, 'scripts/typegen-vite.config.ts'), rootfs)] : [cli, 'build', '.'];
+      const command = 'set -eu; unset LD_LIBRARY_PATH LD_PRELOAD; ' + Object.entries(values).map(([k,v]) => 'export ' + k + '=' + quote(v)).join('; ') + '; cd ' + quote(guestPath(web, rootfs)) + '; exec /usr/local/bin/node --max-old-space-size=192 ' + args.map(quote).join(' ');
+      await runLoggedCommand(path.join(prefix, 'bin/proot-distro'), ['login', 'debian-native', '--', '/bin/bash', '--noprofile', '--norc', '-c', command], { cwd: web, env: { ...safe, LD_LIBRARY_PATH: '', LD_PRELOAD: '' }, logFile });
+    };
+    try {
+      await compiler(false);
+      await runLoggedCommand(path.join(process.env.HOME, '.local/hot-pages-node-v1/bin/node'), ['--max-old-space-size=192', path.join(station.root, 'scripts/static-finish.ts'), client], { cwd: web, env, logFile });
+    } finally { await compiler(true); }
+    await rename(client, destination);
+  } };
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  const { values } = parseArgs({ options: { config: { type: 'string' }, rootfs: { type: 'string' }, prefix: { type: 'string' }, scheduled: { type: 'boolean' }, publish: { type: 'boolean' }, 'publish-only': { type: 'boolean' } } });
+  if (!values.config || !values.rootfs || !values.prefix) throw new Error('explicit config, rootfs and Termux prefix required');
+  const configuration = nativeConfiguration(JSON.parse(await readFile(values.config, 'utf8')), path.resolve(values.rootfs));
+  const adapters = nativeAdapters(configuration, path.resolve(values.rootfs), values.prefix);
+  const result = await runStaticCycle(configuration, { scheduled: values.scheduled, publish: values.publish, publishOnly: values['publish-only'], adapters });
+  console.log(JSON.stringify(result)); process.exitCode = result.exitCode;
+}

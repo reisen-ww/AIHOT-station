@@ -10,6 +10,7 @@ import { countGroupReports } from "./groups.ts";
 import { itemUrl } from "./links.ts";
 import { hasItemPage, publicSourceName } from "./rules.ts";
 import { topicLinks, topicMembership } from "./topics.ts";
+import { livePublicationRead, type PublicationRead } from "./read.ts";
 
 interface DetailRow extends ItemRow {
   body_html: string | null;
@@ -38,7 +39,8 @@ function withOutline(html: string): { html: string; outline: OutlineEntry[] } {
   return { html: out, outline };
 }
 
-async function loadRow(id: string): Promise<DetailRow | null> {
+async function loadRow(id: string, read: PublicationRead): Promise<DetailRow | null> {
+  const sql = read.db;
   const [row] = await sql<DetailRow[]>`
     SELECT ${ITEM_COLUMNS}, a.body_html, a.body_text, a.body_status, tr.body_html AS tr_html, tr.complete AS tr_complete,
       ${topicMembership()} AS topics
@@ -75,8 +77,9 @@ function readingBody(
  * lists leave out (low relevance, merged duplicates, no Chinese summary yet) keep a noindex page;
  * withdrawn and hot_signal items are a 404.
  */
-export async function loadItemDetail(id: string, language: "zh" | "original" = "zh", now = new Date()): Promise<DetailResult> {
-  const row = await loadRow(id);
+export async function loadItemDetail(id: string, language: "zh" | "original" = "zh", now = new Date(), read: PublicationRead = livePublicationRead()): Promise<DetailResult> {
+  const sql = read.db;
+  const row = await loadRow(id, read);
   if (!row || !hasItemPage({ visibility: row.visibility, sourceMode: row.source_mode })) return { kind: "not_found" };
 
   const summary = toItemSummary(row);
@@ -131,13 +134,13 @@ export async function loadItemDetail(id: string, language: "zh" | "original" = "
 
   // The URL carries no list filters, so the counts are the card's unfiltered ones; a fact inside a
   // story counts its whole story, exactly as the card does.
-  const counts = row.fact_id ? await countGroupReports(row.fact_id, {}) : null;
+  const counts = row.fact_id ? await countGroupReports(row.fact_id, {}, now, read) : null;
   const group: SiteItemDetail["group"] = counts
     ? { factId: counts.factPublicId, reportCount: counts.reportCount, additionalSourceCount: counts.additionalSourceCount }
     : null;
 
   // The reason goes with the seat; a report yielding it points to the one holding it.
-  const sameEvent = (await seatHolders([row], now)).get(row.id) ?? null;
+  const sameEvent = (await seatHolders([row], now, sql, read.itemIds)).get(row.id) ?? null;
   const item: SiteItemDetail = {
     ...summary,
     x,
@@ -168,8 +171,8 @@ export function markdownAvailable(row: {
   return !!row.summary || (showsPost(row) && !!row.x_post?.text) || (row.body_mode === "full" && !!row.body_html);
 }
 
-export async function exportMarkdown(id: string): Promise<{ filename: string; body: string } | null> {
-  const row = await loadRow(id);
+export async function exportMarkdown(id: string, read: PublicationRead = livePublicationRead()): Promise<{ filename: string; body: string } | null> {
+  const row = await loadRow(id, read);
   if (!row || !markdownAvailable(row)) return null;
   const lines: string[] = [];
   lines.push(`# ${row.title}`, "");

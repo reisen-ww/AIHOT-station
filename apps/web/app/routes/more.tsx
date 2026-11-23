@@ -5,7 +5,8 @@ import type { loader as rootLoader } from "../root";
 import { useChangelogDot } from "../components/shell/Sidebar";
 import { PhoneBar } from "../components/shell/PhoneBar";
 import type { Screen } from "../components/shell/screens";
-import { edgeTtl } from "../lib/api.server";
+import { edgeTtl } from "../lib/api";
+import { STATIC_SITE, sitePath } from "../lib/deployment";
 import { webModules } from "../site-modules";
 import { pageMeta } from "../lib/seo";
 import { useStarred } from "../lib/local-state";
@@ -29,7 +30,7 @@ export function meta() {
 type Row = { to: string; label: string; icon: ReactNode; detail?: ReactNode };
 
 /** The ways in that the agent page offers, the modules' first; its row names the first three. */
-const agentWays = () => [...webModules().flatMap((m) => m.agentWays ?? []), "MCP", "RSS", "API"];
+const agentWays = () => STATIC_SITE ? ["公开快照", "RSS", "Markdown"] : [...webModules().flatMap((m) => m.agentWays ?? []), "MCP", "RSS", "API"];
 
 /** The modules' tools first, then the engine's. */
 const tools = (): Row[] => [
@@ -93,13 +94,12 @@ export default function MorePage() {
         <Group title="关于">
           <RowLink row={{ to: "/about", label: `关于 ${SITE.name}`, icon: <IconHeart size={20} /> }} />
           <RowLink row={{ to: "/changelog", label: "更新日志", icon: <IconSparkles size={20} /> }} dot={changelogDot} />
-          <RowLink row={{ to: "/feedback", label: "意见反馈", icon: <IconMessage size={20} /> }} />
         </Group>
       </div>
       <div className="mt-6 flex flex-wrap justify-center gap-x-4 gap-y-1 text-[12px] leading-[2] text-ink-4">
         <Link viewTransition to="/terms" className="hover:text-ink-2">{POLICY.terms.name}</Link>
         <Link viewTransition to="/privacy" className="hover:text-ink-2">隐私说明</Link>
-        <a href="/feed.xml" className="hover:text-ink-2">RSS</a>
+        <a href={sitePath("/feed.xml")} className="hover:text-ink-2">RSS</a>
         {SITE.github && <a href={SITE.github} target="_blank" rel="noopener noreferrer" className="hover:text-ink-2">GitHub 开源</a>}
         {SITE.icp && <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer" className="hover:text-ink-2">{SITE.icp}</a>}
       </div>

@@ -7,6 +7,7 @@ import type { HotResponse, TopicsResponse } from "@aihot/contracts/site";
 import { IconClose, IconSearch } from "../../components/icons";
 import { addRecentSearch, clearRecentSearches, useRecentSearches } from "../../lib/local-state";
 import { useModal } from "../../components/ui/modal";
+import { siteFetch } from "../../lib/site-fetch";
 
 // One overlay for the whole site, opened from any bar.
 let overlay: HTMLDivElement | null = null;
@@ -43,8 +44,8 @@ let suggestions: Promise<{ topics: TopicLink[]; hot: Array<{ rank: number; title
 /** Topics and the hot ranking, read once per page load when the search first opens. */
 function loadSuggestions() {
   suggestions ??= Promise.all([
-    fetch("/api/site/topics").then((r) => (r.ok ? (r.json() as Promise<TopicsResponse>) : { topics: [] as TopicLink[] })).catch(() => ({ topics: [] as TopicLink[] })),
-    fetch("/api/site/hot").then((r) => (r.ok ? (r.json() as Promise<HotResponse>) : null)).catch(() => null),
+    siteFetch("/api/site/topics").then((r) => (r.ok ? (r.json() as Promise<TopicsResponse>) : { topics: [] as TopicLink[] })).catch(() => ({ topics: [] as TopicLink[] })),
+    siteFetch("/api/site/hot").then((r) => (r.ok ? (r.json() as Promise<HotResponse>) : null)).catch(() => null),
   ]).then(([t, h]) => ({
     topics: t.topics,
     hot: (h?.entries ?? []).slice(0, 5).map((e) => ({ rank: e.rank, title: e.story.title, to: `/story/${e.story.publicId}` })),
@@ -135,8 +136,9 @@ export function SearchOverlay() {
           <IconSearch size={18} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-4" />
           <input
             ref={input}
-            name="q"
-            type="search"
+             name="q"
+             type="search"
+             aria-label="搜索标题、摘要和正文"
             onInput={(e) => setHasText(!!e.currentTarget.value)}
             tabIndex={shown ? 0 : -1}
             placeholder="搜索标题、摘要和正文"

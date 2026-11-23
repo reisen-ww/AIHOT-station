@@ -32,6 +32,7 @@ function bool(name: string, fallback: boolean): boolean {
 }
 
 export const isProduction = env.NODE_ENV === "production";
+export const capacityPaused = bool("AIHOT_CAPACITY_PAUSED", false);
 
 /** AIHOT_CREDENTIALS_DIR, else the site's own default (relative to the repository). */
 const credentialsDir = env.AIHOT_CREDENTIALS_DIR || DEPLOYMENT.credentialsDir;
@@ -54,7 +55,7 @@ export const config = {
   environmentName: str("AIHOT_ENVIRONMENT", isProduction ? "production" : "development"),
   // External-action valve: off unless the environment turns it on, like COLLECT_ENABLED (read by the
   // worker).
-  modelCallsEnabled: bool("MODEL_CALLS_ENABLED", false),
+  modelCallsEnabled: bool("MODEL_CALLS_ENABLED", false) && !capacityPaused,
   devAdmin: env.DEV_AUTH_ROLE === "admin" ? { displayName: env.DEV_AUTH_DISPLAY_NAME || "Dev Admin" } : null,
   /** The admin password (at least 12 characters). Feishu sign-in below is optional. */
   adminPassword: env.ADMIN_PASSWORD || null,

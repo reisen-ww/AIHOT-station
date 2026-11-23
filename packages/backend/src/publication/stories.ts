@@ -13,6 +13,7 @@ import { latestHotRanking, rankingExtras } from "./hot.ts";
 import { storyTexts } from "./story-text.ts";
 import { topicsOfStory } from "./topics.ts";
 import { itemUrl, storyUrl, v1StoryApiUrl, v1StoryUrl } from "./links.ts";
+import { itemWindow, livePublicationRead, type PublicationRead } from "./read.ts";
 
 export type StoryLookup = { kind: "found"; storyId: number; publicId: string } | { kind: "merged"; target: string } | { kind: "not_found" };
 
@@ -24,7 +25,8 @@ function storyStatusFor(latestAt: Date | null, now: number): "active" | "watchin
   return "settled";
 }
 
-export async function resolveStory(publicId: string): Promise<StoryLookup> {
+export async function resolveStory(publicId: string, read: PublicationRead = livePublicationRead()): Promise<StoryLookup> {
+  const sql = read.db;
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(publicId)) return { kind: "not_found" };
   const [s] = await sql<{ id: number; merged_into: number | null }[]>`SELECT id, merged_into FROM stories WHERE public_id = ${publicId}`;
   let targetId: number | null = s ? (s.merged_into ?? null) : null;
@@ -70,7 +72,8 @@ interface ReportRow extends RepresentativeIdentity {
  * pool-eligible articles; imported hot stories also carry reports the pool leaves out. hot_signal
  * material only adds heat and is not listed.
  */
-async function storyReports(storyId: number, now: Date): Promise<ReportRow[]> {
+async function storyReports(storyId: number, now: Date, read: PublicationRead): Promise<ReportRow[]> {
+  const sql = read.db;
   return sql<ReportRow[]>`
     SELECT DISTINCT ON (p.article_id) p.article_id AS id, p.title, p.summary, p.url, p.selected,
       coalesce(p.published_at, p.discovered_at) AS at, s.id AS source_id, s.name AS source_name,
@@ -79,6 +82,7 @@ async function storyReports(storyId: number, now: Date): Promise<ReportRow[]> {
     FROM facts f JOIN fact_articles fa ON fa.fact_id = f.id JOIN publications p ON p.article_id = fa.article_id
     JOIN sources s ON s.id = p.source_id
     WHERE f.story_id = ${storyId} AND ${storyReportCondition(now)}
+      ${itemWindow(read)}
     ORDER BY p.article_id, (fa.role = 'primary') DESC, (fa.role <> 'mention') DESC, f.id`;
 }
 
@@ -94,10 +98,11 @@ function reportView(r: ReportRow): StoryReportView {
 }
 
 /** The story's reports newest first, its developments, and its latest and first non-mention reports. */
-async function storyContent(storyId: number, now: Date) {
+async function storyContent(storyId: number, now: Date, read: PublicationRead = livePublicationRead()) {
+  const sql = read.db;
   const [s] = await sql<{ public_id: string; title: string }[]>`SELECT public_id::text, title FROM stories WHERE id = ${storyId}`;
   if (!s) return null;
-  const reports = await storyReports(storyId, now);
+  const reports = await storyReports(storyId, now, read);
   if (reports.length === 0) return null;
   reports.sort((a, b) => b.at.getTime() - a.at.getTime() || a.id.localeCompare(b.id));
 
@@ -123,18 +128,20 @@ async function storyContent(storyId: number, now: Date) {
   return { s, reports, primaryReports, developments, latestReport, firstReportAt };
 }
 
-async function relatedStories(storyId: number, now: Date) {
+async function relatedStories(storyId: number, now: Date, read: PublicationRead = livePublicationRead()) {
+  const sql = read.db;
   return sql<{ public_id: string; title: string; relation: "storyline" | "related" }[]>`
     SELECT st.public_id::text, st.title, l.relation FROM story_links l JOIN stories st ON st.id = l.other_id
     WHERE l.story_id = ${storyId} AND st.merged_into IS NULL AND EXISTS (
       SELECT 1 FROM facts f JOIN fact_articles fa ON fa.fact_id = f.id JOIN publications p ON p.article_id = fa.article_id
       JOIN sources s ON s.id = p.source_id
-      WHERE f.story_id = st.id AND ${evidenceCondition()} AND ${storyReportCondition(now)}
+      WHERE f.story_id = st.id AND ${evidenceCondition()} AND ${storyReportCondition(now)} ${itemWindow(read)}
     ) ORDER BY st.latest_at DESC NULLS LAST, st.id DESC LIMIT 8`;
 }
 
-export async function loadStoryDetail(storyId: number, now = new Date()): Promise<StoryDetail | null> {
-  const content = await storyContent(storyId, now);
+export async function loadStoryDetail(storyId: number, now = new Date(), read: PublicationRead = livePublicationRead()): Promise<StoryDetail | null> {
+  const sql = read.db;
+  const content = await storyContent(storyId, now, read);
   if (!content) return null;
   const { s, reports, developments, latestReport, firstReportAt } = content;
   const [why] = await sql<{ p48: number; p6: number; r24: number }[]>`
@@ -144,20 +151,20 @@ export async function loadStoryDetail(storyId: number, now = new Date()): Promis
              AND participant_key NOT IN (SELECT participant_key FROM cs x WHERE x.observed_at <= ${now}::timestamptz - interval '6 hours')) AS p6,
            count(*) FILTER (WHERE kind = 'editorial' AND observed_at > ${now}::timestamptz - interval '24 hours') AS r24
     FROM cs`;
-  const ranking = await latestHotRanking();
+  const ranking = await latestHotRanking(read);
   const entry = ranking?.entries.find((e) => e.storyId === storyId) ?? null;
   // Only hours observed in full are drawn (the chart leaves a gap otherwise), over one comparable group.
-  const heat = await heatSeries(storyId, now);
+  const heat = await heatSeries(storyId, now, 7, sql);
   // Complete when none of the sources behind the last 48 hours' participants is behind on collection.
-  const behind = behindSources(await sourceClocks(), now.getTime(), true);
+  const behind = behindSources(await sourceClocks(sql), now.getTime(), true);
   const [partial] = behind.length
     ? await sql<{ n: number }[]>`SELECT count(*)::int AS n FROM ${currentSignals()} cs WHERE story_id = ${storyId} AND source_id = ANY(${behind}::text[])
                                   AND observed_at > ${now}::timestamptz - interval '48 hours' AND observed_at <= ${now}`
     : [{ n: 0 }];
-  const [related, topics, texts] = await Promise.all([relatedStories(storyId, now), topicsOfStory(storyId, now), storyTexts([storyId], now)]);
+  const [related, topics, texts] = await Promise.all([relatedStories(storyId, now, read), topicsOfStory(storyId, now, read), storyTexts([storyId], now, sql)]);
   const text = texts.get(storyId)!;
   // Historical stories without listed evidence retain their latest readable report.
-  const latest = text.latest ?? latestReport;
+  const latest = text.latest && (!read.itemIds || read.itemIds.includes(text.latest.id)) ? text.latest : latestReport;
   const latestAt = latest.at;
   // Without a digest or a summary of its own, the story opens with its first development's representative report.
   const origin = developments[developments.length - 1]?.representative;
@@ -194,7 +201,8 @@ export async function loadStoryDetail(storyId: number, now = new Date()): Promis
 const SPARK_HOURS = 24;
 
 /** Hourly heat of the ranked stories over the day before the ranking, one slot per hour. */
-async function sparklines(storyIds: number[], at: Date): Promise<Map<number, Array<number | null>>> {
+async function sparklines(storyIds: number[], at: Date, read: PublicationRead): Promise<Map<number, Array<number | null>>> {
+  const sql = read.db;
   const end = Math.floor(at.getTime() / 3600000) * 3600000;
   const start = end - SPARK_HOURS * 3600000;
   const rows = storyIds.length
@@ -216,8 +224,9 @@ async function sparklines(storyIds: number[], at: Date): Promise<Map<number, Arr
 const hotCovers = cachedByKey((ranking: HotRanking) => String(ranking.id), queryHotCovers, { ...SHARED_ONLY, maxKeys: 4 });
 
 /** A picture per story from its public full-text reports, the representative first, wide enough for a card. */
-async function queryHotCovers({ entries }: HotRanking) {
-  const at = new Date();
+async function queryHotCovers({ entries }: HotRanking, read: PublicationRead = livePublicationRead()) {
+  const sql = read.db;
+  const at = read.now;
   const ids = entries.map((e) => e.storyId);
   const reps = entries.map((e) => e.representativeItemId).filter((id): id is string => !!id);
   const rows = await sql<{ story_id: number; m: { url: string; width?: number; height?: number } }[]>`
@@ -227,23 +236,23 @@ async function queryHotCovers({ entries }: HotRanking) {
       SELECT m FROM jsonb_array_elements(coalesce(a.media, '[]'::jsonb)) m
       WHERE m->>'kind' = 'image' AND coalesce((m->>'width')::numeric, 800) >= 480 LIMIT 1
     ) img
-    WHERE p.story_id = ANY(${ids}::bigint[]) AND ${listedCondition(at)} AND p.body_mode <> 'summary'
+    WHERE p.story_id = ANY(${ids}::bigint[]) AND ${listedCondition(at)} AND p.body_mode <> 'summary' ${itemWindow(read)}
     ORDER BY p.story_id, (p.article_id::text = ANY(${reps}::text[])) DESC, p.first_party DESC, p.selected DESC, coalesce(p.score, 0) DESC, p.article_id`;
   const covers = new Map(rows.map((c) => [Number(c.story_id), { url: c.m.url, width: typeof c.m.width === "number" ? c.m.width : null, height: typeof c.m.height === "number" ? c.m.height : null }]));
   return covers;
 }
 
-export async function loadHot(): Promise<HotResponse> {
-  const ranking = await latestHotRanking();
+export async function loadHot(read?: PublicationRead): Promise<HotResponse> {
+  const ranking = await latestHotRanking(read);
   if (!ranking) return { computedAt: null, windowHours: 48, entries: [] };
   const at = new Date(ranking.computedAt);
   const [sparks, covers, extras] = await Promise.all([
     sparklines(
       ranking.entries.map((e) => e.storyId),
-      at,
+      at, read ?? livePublicationRead(),
     ),
-    hotCovers(ranking),
-    rankingExtras(ranking),
+    read ? queryHotCovers(ranking, read) : hotCovers(ranking),
+    rankingExtras(ranking, read),
   ]);
   return {
     computedAt: ranking.computedAt,

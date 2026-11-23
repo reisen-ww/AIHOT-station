@@ -1,7 +1,7 @@
 import { Link, useLoaderData } from "react-router";
 import type { ReportIndexEntry, ReportIndexResponse } from "@aihot/contracts/site";
 import { SITE, withSubject } from "@aihot/site";
-import { apiGet, edgeTtl } from "../lib/api.server";
+import { apiGet, edgeTtl } from "../lib/api";
 import { archiveLd, pageMeta } from "../lib/seo";
 import { beijingDate } from "@aihot/contracts/time";
 import { weekdayShort } from "../lib/format";

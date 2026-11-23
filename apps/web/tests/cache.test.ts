@@ -212,9 +212,7 @@ test("a shared cache may keep an item page longer than browsers", async () => {
 
 test("browser caching preserves noindex and private sign-in responses", async () => {
   const feedback = await fetch(origin + "/feedback");
-  assert.equal(feedback.status, 200);
-  assert.match(await feedback.text(), /name="robots" content="noindex/);
-  assert.equal(feedback.headers.get("Cache-Control"), "public, max-age=300, s-maxage=300, must-revalidate");
+  assert.equal(feedback.status, 404);
   const login = await fetch(origin + "/admin/login");
   assert.equal(login.status, 200);
   assert.equal(login.headers.get("Cache-Control"), "private, no-store");

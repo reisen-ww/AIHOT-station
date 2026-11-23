@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "workDirectory": "/root/hot-pages-static-work",
+  "budgetBytes": 900000000,
+  "keepSuccessfulRuns": 2,
+  "stations": {
+    "aihot": {
+      "root": "/root/apps/AIHOT",
+      "databaseEnv": "STATIC_AIHOT_DATABASE_URL",
+      "maxItems": 1000,
+      "retainScoreAtLeast": 85
+    },
+    "cryptohot": {
+      "root": "/root/apps/CryptoHot",
+      "databaseEnv": "STATIC_CRYPTOHOT_DATABASE_URL",
+      "maxItems": 1000,
+      "retainScoreAtLeast": 85
+    },
+    "acadhot": {
+      "root": "/root/apps/AcadHot",
+      "databaseEnv": "STATIC_ACADHOT_DATABASE_URL",
+      "maxItems": 1000,
+      "retainScoreAtLeast": 85
+    },
+    "openhot": {
+      "root": "/root/apps/OpenHot",
+      "databaseEnv": "STATIC_OPENHOT_DATABASE_URL",
+      "maxItems": 1000,
+      "retainScoreAtLeast": 85
+    }
+  },
+  "publisher": {
+    "remote": "git@github.com:reisen-ww/hot-pages.git",
+    "branch": "main",
+    "authorName": "REPLACE_WITH_GIT_AUTHOR_NAME",
+    "authorEmail": "REPLACE_WITH_GIT_AUTHOR_EMAIL",
+    "confirmationSeconds": 180
+  }
+}

@@ -1,7 +1,7 @@
 // What the site tells readers about an event (the hot list and the event page), by the rule the digest is
 // written by (events/digest.ts): its listed evidence. A digest stands while its saved evidence remains
 // public and unchanged; the latest development is the newest listed evidence.
-import { sql } from "../db.ts";
+import { sql, type Db } from "../db.ts";
 import { evidenceCondition, listedCondition } from "./scope.ts";
 import { digestInputsHash, digestReports } from "./story-evidence.ts";
 
@@ -14,7 +14,8 @@ export interface StoryText {
   latest: { id: string; title: string; at: Date } | null;
 }
 
-export async function storyTexts(storyIds: number[], now = new Date()): Promise<Map<number, StoryText>> {
+export async function storyTexts(storyIds: number[], now = new Date(), db: Db = sql): Promise<Map<number, StoryText>> {
+  const sql = db;
   if (storyIds.length === 0) return new Map();
   const rows = await sql<{ id: number; digest: string | null; digest_updated_at: Date | null; article_ids: string[] | null; inputs_hash: string | null; current: boolean; summary: string | null; latest_id: string | null; latest_title: string; latest_at: Date }[]>`
     SELECT st.id, st.digest, st.digest_updated_at, saved.article_ids, saved.inputs_hash,
